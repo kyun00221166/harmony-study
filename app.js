@@ -98,10 +98,13 @@ function progList(K, degs, qs = DIA_Q, sc = MAJ) {
 }
 const playProg = (K, degs, qs, sc, beat) => playChords(progList(K, degs, qs, sc), beat);
 
-// 지판 박스: 루트(s,f)에서 3음씩 한 줄씩 쌓기
-function boxMarks(s, f, semis, labels) {
+// 스케일 포지션 운지 (한 손가락 = 한 프렛). 각 음이 루트 줄에서 몇 줄 떨어지는지
+// 메이저: 루트를 중지로 → 1 2 | 3 4 5 | 6 7 8  (3음은 다음 줄 1프렛 왼쪽)
+// 마이너: 루트를 검지로 → 1 2 ♭3 | 4 5 ♭6 | ♭7 8
+const MAJ_KS = [0, 0, 1, 1, 1, 2, 2, 2], MIN_KS = [0, 0, 0, 1, 1, 1, 2, 2];
+function boxMarks(s, f, semis, labels, ks = MAJ_KS) {
   return semis.map((n, i) => {
-    const k = Math.min(Math.floor(i / 3), 3 - s);
+    const k = Math.min(ks[i], 3 - s);
     return { s: s + k, f: f + n - 5 * k, t: labels[i], c: n % 12 === 0 ? 'root' : 'ok' };
   });
 }
@@ -131,7 +134,7 @@ function ivShape(n) {
   return c[0];
 }
 function shapeText({ k, d }) {
-  const line = k === 0 ? '같은 줄' : `${k}줄 위`;
+  const line = k === 0 ? '같은 줄' : `${k}줄 ${UP}`;
   const dir = d === 0 ? '같은 프렛' : d > 0 ? `${d}프렛 오른쪽` : `${-d}프렛 왼쪽`;
   return `${line}, ${dir}`;
 }
@@ -149,13 +152,41 @@ let actx;
 function audio() {
   if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
   if (actx.state === 'suspended') actx.resume();
+  loadSamples(actx);
   return actx;
+}
+// 실제 베이스 녹음 샘플 (samples/bass/<midi>.mp3, 단3도 간격). 없으면 신스로 대체
+const SAMPLE_MIDIS = []; for (let m = 28; m <= 79; m += 3) SAMPLE_MIDIS.push(m);
+const samples = {}; let samplesLoading = false;
+function loadSamples(c) {
+  if (samplesLoading) return; samplesLoading = true;
+  SAMPLE_MIDIS.forEach(m => fetch(`samples/bass/${m}.mp3`)
+    .then(r => r.ok ? r.arrayBuffer() : Promise.reject())
+    .then(b => new Promise((ok, no) => c.decodeAudioData(b, ok, no)))
+    .then(buf => { samples[m] = buf; }).catch(() => {}));
+}
+function nearestSample(m) {
+  let best = null;
+  for (const k in samples) if (best == null || Math.abs(k - m) < Math.abs(best - m)) best = +k;
+  return best != null && Math.abs(best - m) <= 2 ? best : null;
 }
 function pluck(midi, when = 0, dur = 1.0, vol = 0.45) {
   if (!S.settings.sound) return;
   const c = audio();
   const t = c.currentTime + when + 0.03;
   const m = midi + (S.settings.octUp ? 12 : 0);
+  const sm = S.settings.real ? nearestSample(m) : null;
+  if (sm != null) {
+    const src = c.createBufferSource(); src.buffer = samples[sm];
+    src.playbackRate.value = Math.pow(2, (m - sm) / 12);
+    const g = c.createGain();
+    g.gain.setValueAtTime(vol * 2.2, t);
+    g.gain.setValueAtTime(vol * 2.2, t + Math.max(0.05, dur - 0.12));
+    g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    src.connect(g); g.connect(c.destination);
+    src.start(t); src.stop(t + dur + 0.02);
+    return;
+  }
   const f = 440 * Math.pow(2, (m - 69) / 12);
   const o1 = c.createOscillator(); o1.type = 'sawtooth'; o1.frequency.value = f;
   const o2 = c.createOscillator(); o2.type = 'sine'; o2.frequency.value = f;
@@ -183,7 +214,9 @@ function playChord(ms) {
 const KEY = 'harmony-study-v1';
 const S = Object.assign({ items: {}, lessons: {}, streak: { last: null, count: 0 }, hideInstall: false },
   JSON.parse(localStorage.getItem(KEY) || '{}'));
-S.settings = Object.assign({ sound: true, octUp: true }, S.settings);
+S.settings = Object.assign({ sound: true, octUp: true, real: true, tabView: false }, S.settings);
+// 지판 방향: 연주자 시점(E현이 위, 가는 줄이 "아래") / TAB 방향(G현이 위)
+const UP = S.settings.tabView ? '위' : '아래';
 const save = () => localStorage.setItem(KEY, JSON.stringify(S));
 const dstr = d => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 function touchStreak() {
@@ -218,13 +251,13 @@ function board(o = {}) {
   const to = o.to ?? 12, W = 680, H = 232, NUT = 76;
   const fw = (W - NUT - 10) / to;
   const X = f => f === 0 ? NUT - 26 : NUT + (f - 0.5) * fw;
-  const Y = s => 34 + (3 - s) * 52;  // G현이 위, E현이 아래 (연주자 시점)
-  let g = `<rect x="${NUT}" y="12" width="${W - NUT - 10}" height="${Y(0) - Y(3) + 44}" rx="4" class="fb-wood"/>`;
+  const Y = s => 34 + (S.settings.tabView ? 3 - s : s) * 52;  // 기본: 연주자 시점 (E현이 위)
+  let g = `<rect x="${NUT}" y="12" width="${W - NUT - 10}" height="${3 * 52 + 44}" rx="4" class="fb-wood"/>`;
   const mid = (Y(1) + Y(2)) / 2;
   [3, 5, 7, 9].filter(f => f <= to).forEach(f => g += `<circle cx="${X(f)}" cy="${mid}" r="7" class="fb-inlay"/>`);
   if (to >= 12) g += `<circle cx="${X(12)}" cy="${(Y(2) + Y(3)) / 2}" r="7" class="fb-inlay"/><circle cx="${X(12)}" cy="${(Y(0) + Y(1)) / 2}" r="7" class="fb-inlay"/>`;
-  for (let f = 1; f <= to; f++) g += `<line x1="${NUT + f * fw}" y1="12" x2="${NUT + f * fw}" y2="${Y(0) + 32}" class="fb-fret"/>`;
-  g += `<rect x="${NUT - 3}" y="12" width="6" height="${Y(0) - Y(3) + 44}" class="fb-nut"/>`;
+  for (let f = 1; f <= to; f++) g += `<line x1="${NUT + f * fw}" y1="12" x2="${NUT + f * fw}" y2="${34 + 3 * 52 + 32}" class="fb-fret"/>`;
+  g += `<rect x="${NUT - 3}" y="12" width="6" height="${3 * 52 + 44}" class="fb-nut"/>`;
   for (let s = 0; s < 4; s++) {
     const on = o.str == null || o.str === s;
     g += `<line x1="${NUT - 50}" y1="${Y(s)}" x2="${W - 10}" y2="${Y(s)}" class="fb-str ${on ? '' : 'dim'}" stroke-width="${1.4 + (3 - s) * 0.9}"/>`;
@@ -324,7 +357,7 @@ const QUIZ = {
     items() { const k = []; KEYS.forEach((_, i) => [2, 3, 4, 5, 6, 7].forEach(d => k.push(`dg:${i}:${d}`))); return k; },
     make(key) {
       const [, i, d] = key.split(':').map(Number), K = KEYS[i][0], sc = scaleOf(K), ans = sc[d - 1];
-      const p = rootPos(parsePc(K), 1, 8);
+      const p = rootPos(parsePc(K), 2, 9);
       const marks = boxMarks(p.s, p.f, [...MAJ, 12], [...sc, K]).map((m, j) => j === d - 1 ? { ...m, c: 'ok' } : { ...m, c: j === 0 || j === 7 ? 'root' : 'soft' });
       return {
         prompt: `<b>${K} 메이저</b>의 <b>${d}음</b>은?`,
@@ -339,7 +372,7 @@ const QUIZ = {
     stage: 3, title: '키의 몇 번째 음? (지판에서 짚기)',
     items: () => [2, 3, 4, 5, 6, 7].map(d => `dt:${d}`),
     make(key) {
-      const d = +key.split(':')[1], s = rnd(2), f = 1 + rnd(7), K = keyByPc(pcAt(s, f));
+      const d = +key.split(':')[1], s = rnd(2), f = 2 + rnd(7), K = keyByPc(pcAt(s, f));
       const sc = scaleOf(K), ans = sc[d - 1], ap = parsePc(ans);
       const marks = boxMarks(s, f, [...MAJ, 12], ['1', '2', '3', '4', '5', '6', '7', '1']).map((m, j) => j === d - 1 ? { ...m, t: ans, c: 'ok' } : { ...m, c: j === 0 || j === 7 ? 'root' : 'soft' });
       return {
@@ -347,7 +380,7 @@ const QUIZ = {
         board: { tap: true, marks: [{ s, f, t: 'R', c: 'root' }] }, tap: true,
         after: { marks },
         correct: v => pcAt(v.s, v.f) === ap,
-        explain: `${K} 메이저의 ${d}음 = <b>${ans}</b>. 메이저 스케일 박스(3음씩 한 줄)에서 ${d}번째 자리.`,
+        explain: `${K} 메이저의 ${d}음 = <b>${ans}</b>. 루트를 중지로 잡는 메이저 포지션에서 ${d}번째 자리.`,
         play: () => { const r = midiAt(s, f); playSeq([r, r + MAJ[d - 1]]); },
       };
     },
@@ -379,7 +412,7 @@ const QUIZ = {
         prompt: dir === 0 ? `<b>${K} 메이저</b>와 같은 음을 쓰는 마이너 키는?` : `<b>${m} 마이너</b>와 같은 음을 쓰는 메이저 키는?`,
         board: null, after: null,
         choices: noteChoices(), correct: v => v === parsePc(ans),
-        explain: `${K} 메이저 = ${m} 마이너. 메이저의 6음(${m})에서 시작하면 마이너, 마이너의 ♭3음(${K})에서 시작하면 메이저. 지판으로는 단3도(1줄 위, 2프렛 왼쪽) 관계.`,
+        explain: `${K} 메이저 = ${m} 마이너. 메이저의 6음(${m})에서 시작하면 마이너, 마이너의 ♭3음(${K})에서 시작하면 메이저. 지판으로는 단3도(1줄 ${UP}, 2프렛 왼쪽) 관계.`,
         play: () => { const r = 33 + (parsePc(m) - 9 + 12) % 12; playSeq([r, r + 3]); },
       };
     },
@@ -517,7 +550,7 @@ const QUIZ = {
       if (t === 'M') {
         ans = majIIVI(K); label = `${K} 메이저`;
         wrong = [majIIVI(spell(K, 5, 3)), majIIVI(spell(K, 7, 4)), `${scaleOf(K)[1]}maj7 – ${scaleOf(K)[4]}7 – ${K}m7`, `${scaleOf(K)[1]}m7 – ${scaleOf(K)[4]}maj7 – ${K}maj7`];
-        explain = `<b>${ans}</b>. ⅱm7 → Ⅴ7 → Ⅰmaj7. 루트가 4도 위로 두 번 이동 (베이스: 한 줄 위 같은 프렛).`;
+        explain = `<b>${ans}</b>. ⅱm7 → Ⅴ7 → Ⅰmaj7. 루트가 4도 위로 두 번 이동 (베이스: 한 줄 ${UP} 같은 프렛).`;
         play = () => playProg(K, [2, 5, 1]);
       } else {
         ans = minIIVI(K); label = `${K} 마이너`;
@@ -648,7 +681,7 @@ const LESSONS = [
         board: { to: 5, marks: [{ s: 0, f: 5, t: 'A', c: 'ok' }, { s: 1, f: 0, t: 'A', c: 'ok' }, { s: 1, f: 5, t: 'D', c: 'soft' }, { s: 2, f: 0, t: 'D', c: 'soft' }, { s: 2, f: 5, t: 'G', c: 'ok' }, { s: 3, f: 0, t: 'G', c: 'ok' }] } },
       { h: '12프렛 = 옥타브', b: `<p>12프렛(점 두 개)에서 개방현과 <b>같은 이름</b>이 다시 시작돼요. 한 옥타브 높을 뿐.</p><p>→ 결국 <b>0~11프렛만 외우면</b> 지판 전체를 아는 셈.</p>`,
         board: { marks: [0, 1, 2, 3].flatMap(s => [{ s, f: 0, t: STR[s].n, c: 'root' }, { s, f: 12, t: STR[s].n, c: 'root' }]) } },
-      { h: '옥타브 모양: 두 줄 위, 2프렛 오른쪽', b: `<p>E현 3프렛 G → D현 5프렛도 G. 베이스 라인에서 정말 많이 쓰는 모양이에요 (디스코·펑크 옥타브 주법).</p>`,
+      { h: `옥타브 모양: 두 줄 ${UP}, 2프렛 오른쪽`, b: `<p>E현 3프렛 G → D현 5프렛도 G. 베이스 라인에서 정말 많이 쓰는 모양이에요 (디스코·펑크 옥타브 주법).</p>`,
         board: { to: 7, marks: [{ s: 0, f: 3, t: 'G', c: 'root' }, { s: 2, f: 5, t: 'G', c: 'ok' }, { s: 1, f: 3, t: 'C', c: 'root' }, { s: 3, f: 5, t: 'C', c: 'ok' }] },
         sounds: [{ label: 'G 옥타브', seq: [31, 43] }, { label: 'C 옥타브', seq: [36, 48] }] },
       { h: '외우는 요령', b: `<p>처음부터 다 외우지 말고 <b>E현·A현 0~5프렛의 자연음</b>부터.</p><p class="big">E현: E F · G · A<br>A현: A · B C · D</p><p>루트는 대부분 E현·A현에서 잡으니까, 여기만 알아도 코드 차트 보고 바로 루트를 짚을 수 있어요. 이제 퀴즈로!</p>`,
@@ -663,13 +696,13 @@ const LESSONS = [
       { h: '베이스 핵심 음정 5개', b: `<p>코드의 뼈대가 전부 이걸로 만들어져요.</p>
         <table class="tbl"><tr><th>이름</th><th>반음</th><th>지판 모양</th><th></th></tr>
         ${BASIC.map(n => `<tr><td>${ivLabel(n)}</td><td>${n}</td><td>${shapeText(ivShape(n))}</td><td><button class="mini" data-seq="36,${36 + n}">▶</button></td></tr>`).join('')}</table>` },
-      { h: '완전5도: 한 줄 위, 2프렛 오른쪽', b: `<p>루트 + 5도 = 베이스의 기본 중 기본 (컨트리·록 "루트-파이브").</p><p>A현 3프렛 C → D현 5프렛 G.</p>`,
+      { h: `완전5도: 한 줄 ${UP}, 2프렛 오른쪽`, b: `<p>루트 + 5도 = 베이스의 기본 중 기본 (컨트리·록 "루트-파이브").</p><p>A현 3프렛 C → D현 5프렛 G.</p>`,
         board: { to: 7, marks: [{ s: 1, f: 3, t: 'C', c: 'root' }, { s: 2, f: 5, t: 'G', c: 'ok' }] },
         sounds: [{ label: 'C → G (P5)', seq: [36, 43] }] },
-      { h: '장3도 vs 단3도', b: `<p><b>장3도</b>: 한 줄 위, 1프렛 왼쪽 → 밝은 소리 (메이저 코드)</p><p><b>단3도</b>: 한 줄 위, 2프렛 왼쪽 → 어두운 소리 (마이너 코드)</p><p>코드가 C인지 Cm인지는 <b>이 한 음</b>이 결정해요.</p>`,
+      { h: '장3도 vs 단3도', b: `<p><b>장3도</b>: 한 줄 ${UP}, 1프렛 왼쪽 → 밝은 소리 (메이저 코드)</p><p><b>단3도</b>: 한 줄 ${UP}, 2프렛 왼쪽 → 어두운 소리 (마이너 코드)</p><p>코드가 C인지 Cm인지는 <b>이 한 음</b>이 결정해요.</p>`,
         board: { to: 7, marks: [{ s: 1, f: 3, t: 'C', c: 'root' }, { s: 2, f: 2, t: 'E', c: 'ok' }, { s: 2, f: 1, t: 'E♭', c: 'soft' }] },
         sounds: [{ label: 'C → E (M3)', seq: [36, 40] }, { label: 'C → E♭ (m3)', seq: [36, 39] }] },
-      { h: '완전4도: 한 줄 위, 같은 프렛', b: `<p>줄과 줄 사이가 원래 완전4도라서, 바로 위 줄 같은 프렛이에요.</p><p>A현 3프렛 C → D현 3프렛 F.</p>`,
+      { h: `완전4도: 한 줄 ${UP}, 같은 프렛`, b: `<p>줄과 줄 사이가 원래 완전4도라서, 바로 ${UP} 줄 같은 프렛이에요.</p><p>A현 3프렛 C → D현 3프렛 F.</p>`,
         board: { to: 7, marks: [{ s: 1, f: 3, t: 'C', c: 'root' }, { s: 2, f: 3, t: 'F', c: 'ok' }] },
         sounds: [{ label: 'C → F (P4)', seq: [36, 41] }] },
       { h: '전체 12음정 표', b: `<table class="tbl"><tr><th>이름</th><th>반음</th><th>지판 모양</th><th></th></tr>
@@ -684,7 +717,7 @@ const LESSONS = [
     id: 'l3', stage: 3, title: '장음계 · 단음계 · 조', quizzes: ['deg', 'degTap', 'keysig', 'rel'],
     cards: [
       { h: '스케일 = 규칙대로 고른 음 7개', b: `<p>12음 중 7개를 골라 쓰는 <b>팔레트</b>예요. 가장 기본이 <b>장음계(메이저 스케일)</b>.</p><p class="big">온 · 온 · 반 · 온 · 온 · 온 · 반</p><p>이 공식만 알면 <b>어느 음에서 시작해도</b> 메이저 스케일을 만들 수 있어요. 베이스에선 온=2프렛, 반=1프렛.</p>` },
-      { h: 'C 메이저 = C D E F G A B', b: `<p>♯·♭이 하나도 없는 유일한 메이저. A현 3프렛(C)에서 시작하는 <b>3음씩 한 줄</b> 박스 모양을 손에 익혀요.</p>`,
+      { h: 'C 메이저 = C D E F G A B', b: `<p>♯·♭이 하나도 없는 유일한 메이저. A현 3프렛(C)을 <b>중지</b>로 잡는 포지션이 기본이에요.</p><p class="big">검지 = 2프렛 · 중지 = 3프렛 · 약지 = 4프렛 · 새끼 = 5프렛</p><p>한 손가락이 한 프렛을 맡으니 손을 옮기지 않고 한 옥타브가 다 나와요. <b>3음은 다음 줄(가는 줄) 1프렛 왼쪽</b>을 검지로.</p><p class="note">한 줄에 3음씩 옆으로 뻗는 운지도 있지만, 기본은 이 포지션이에요.</p>`,
         board: { to: 9, marks: boxMarks(1, 3, [...MAJ, 12], [...scaleOf('C'), 'C']) },
         sounds: [{ label: 'C 메이저 스케일', seq: [...MAJ, 12].map(x => 36 + x) }] },
       { h: '이 모양은 어디로든 옮길 수 있다', b: `<p>똑같은 모양을 E현 3프렛(G)에서 시작하면 <b>G 메이저</b>. 키가 바뀌어도 <b>모양은 그대로</b>, 위치만 이동. 베이스의 큰 장점이에요.</p><p>그래서 음 이름보다 <b>번호(1~7)</b>로 외워두면 모든 키에서 써먹을 수 있어요.</p>`,
@@ -693,10 +726,10 @@ const LESSONS = [
       { h: '음 번호 = 디그리', b: `<p>스케일 음에 번호를 붙여요. C 메이저면 C=1, D=2, E=3 … B=7.</p><p>코드도 솔로도 <b>전부 번호로 말해요</b>: "메이저 코드 = 1·3·5", "3음에 착지", "♭7". 키가 바뀌어도 번호의 <b>역할과 소리 느낌</b>은 같아요.</p><p class="note">귀 훈련 팁: 1은 집, 7은 1로 가고 싶어 안달, 4는 3으로 내려가고 싶어함.</p>`,
         sounds: [{ label: '7 → 1 (해결)', seq: [47, 48] }, { label: '4 → 3', seq: [41, 40] }, { label: '1-3-5', seq: [36, 40, 43] }] },
       { h: '조(Key) = 곡의 중심', b: `<p>"이 곡 키가 G야" = <b>G가 집(중심)</b>이고 G 메이저 스케일 음을 주로 쓴다는 뜻.</p><p>G 메이저 = G A B C D E <b>F♯</b> → ♯가 1개. 이렇게 키마다 붙는 ♯·♭을 <b>조표</b>라고 해요.</p><p class="note">철자 규칙: 스케일엔 알파벳이 한 번씩만 나와요. 그래서 G 메이저의 7음은 G♭이 아니라 F♯.</p>` },
-      { h: '5도권: 키들의 지도', b: `<p>C에서 <b>5도씩 올라가면</b> ♯가 하나씩 늘어요.</p><p class="big">C → G → D → A → E → B → F♯</p><p><b>4도씩 올라가면</b>(=5도 아래) ♭가 하나씩.</p><p class="big">C → F → B♭ → E♭ → A♭ → D♭</p><p><b>재즈 코드 진행은 이 4도 방향으로 많이 움직여요</b> (6단계). 베이스에서 4도 위 = 한 줄 위 같은 프렛이라 손이 쉽게 따라가요.</p>`,
+      { h: '5도권: 키들의 지도', b: `<p>C에서 <b>5도씩 올라가면</b> ♯가 하나씩 늘어요.</p><p class="big">C → G → D → A → E → B → F♯</p><p><b>4도씩 올라가면</b>(=5도 아래) ♭가 하나씩.</p><p class="big">C → F → B♭ → E♭ → A♭ → D♭</p><p><b>재즈 코드 진행은 이 4도 방향으로 많이 움직여요</b> (6단계). 베이스에서 4도 위 = 한 줄 ${UP} 같은 프렛이라 손이 쉽게 따라가요.</p>`,
         sounds: [{ label: '4도씩: C F B♭ E♭', seq: [36, 41, 46, 51] }] },
       { h: '나란한조: C 메이저 = A 마이너', b: `<p>C 메이저의 <b>6음(A)</b>에서 시작하면 A 자연단음계. 음은 똑같고 중심만 달라요.</p><p class="big">1 2 ♭3 4 5 ♭6 ♭7</p><p>메이저 공식과 비교해 3·6·7음이 반음 낮아요 → 어두운 소리. 그림은 E현 5프렛(A)에서 시작하는 마이너 박스.</p>`,
-        board: { to: 9, marks: boxMarks(0, 5, [...MIN, 12], ['1', '2', '♭3', '4', '5', '♭6', '♭7', '1']) },
+        board: { to: 9, marks: boxMarks(0, 5, [...MIN, 12], ['1', '2', '♭3', '4', '5', '♭6', '♭7', '1'], MIN_KS) },
         sounds: [{ label: 'A 마이너 스케일', seq: [...MIN, 12].map(x => 33 + x) }, { label: 'C 메이저 (같은 음)', seq: [...MAJ, 12].map(x => 36 + x) }] },
       { h: '솔로에서는?', b: `<p>곡의 키 스케일 7음 = 일단 <b>크게 틀리지 않는 음</b>.</p><p>그런데 7음의 무게가 다 같지는 않아요. <b>지금 울리는 코드의 구성음</b>이 가장 강하게 맞아요. 그게 다음 단계(코드톤)예요.</p><p class="note">🎸 집 연습: 키 하나를 정하고 박스 안의 음만으로 4마디 흥얼거리듯 쳐보기. 끝은 항상 1음으로.</p>` },
     ],
@@ -711,7 +744,7 @@ const LESSONS = [
       { h: '7th 코드 4종 (C 기준)', b: `<table class="tbl"><tr><th>기호</th><th>구성</th><th>C 예시</th><th></th></tr>
         ${Object.keys(CH).map(q => `<tr><td><b>C${CH[q].sym}</b><br><small>${CH[q].ko}</small></td><td>${CH[q].t.map(t => t[2]).join(' ')}</td><td>${chordNotes('C', q).join(' ')}</td><td><button class="mini" data-seq="${CH[q].t.map(t => 36 + t[0]).join(',')}">▶</button></td></tr>`).join('')}</table>
         <p class="note">다른 표기: Cmaj7 = CΔ7, Cm7 = C-7, Cm7♭5 = Cø</p>` },
-      { h: 'maj7: 밝고 안정', b: `<p>1 · 3 · 5 · <b>7</b>. 7음이 루트 바로 반음 아래라 살짝 몽환적. 주로 <b>Ⅰ, Ⅳ</b> 자리.</p><p>모양: 3은 한 줄 위 1프렛 왼쪽, 5는 한 줄 위 2프렛 오른쪽, 7은 두 줄 위 1프렛 오른쪽.</p>`,
+      { h: 'maj7: 밝고 안정', b: `<p>1 · 3 · 5 · <b>7</b>. 7음이 루트 바로 반음 아래라 살짝 몽환적. 주로 <b>Ⅰ, Ⅳ</b> 자리.</p><p>모양: 3은 한 줄 ${UP} 1프렛 왼쪽, 5는 한 줄 ${UP} 2프렛 오른쪽, 7은 두 줄 ${UP} 1프렛 오른쪽.</p>`,
         board: { to: 7, marks: chordMarks(1, 3, 'maj7') }, sounds: [{ label: 'Cmaj7', seq: [36, 40, 43, 47] }] },
       { h: '7 (도미넌트): 긴장', b: `<p>1 · 3 · 5 · <b>♭7</b>. 3음과 ♭7음 사이가 <b>트라이톤</b> → 불안정 → 다음 코드로 풀리고 싶어해요.</p><p><b>Ⅴ7 → Ⅰ</b>(G7 → C)이 화성의 엔진이에요. 솔로에서 이 "풀림"을 들려주는 게 핵심.</p>`,
         board: { to: 7, marks: chordMarks(1, 3, 'dom') }, sounds: [{ label: 'C7', seq: [36, 40, 43, 46] }, { label: 'G7 → C (해결)', seq: [31, 35, 38, 41, 36] }] },
@@ -735,7 +768,7 @@ const LESSONS = [
       { h: '기능: 집 · 출발 · 긴장', b: `<p><b>토닉</b> (Ⅰ ⅲ ⅵ): 집, 안정<br><b>서브도미넌트</b> (ⅱ Ⅳ): 집을 떠나 출발<br><b>도미넌트</b> (Ⅴ ⅶ): 긴장, 집으로 돌아가고 싶음</p><p>대부분의 진행은 <b>토닉 → 서브도미넌트 → 도미넌트 → 토닉</b>으로 숨을 쉬어요.</p>`,
         sounds: [{ label: 'Ⅰ – Ⅳ – Ⅴ – Ⅰ', chords: progList('C', [1, 4, 5, 1]) }, { label: 'Ⅰ – ⅱ – Ⅴ – Ⅰ', chords: progList('C', [1, 2, 5, 1]) }] },
       { h: '7 코드는 키에 딱 하나', b: `<p>7개 중 <b>도미넌트7(그냥 "7")은 Ⅴ 하나뿐</b>이에요.</p><p>그래서 차트에서 7 코드를 찾으면 키가 보여요: <b>그 코드의 4도 위가 Ⅰ</b>.</p><p class="big">D7이 보이면 → G 키 후보<br>B♭7이 보이면 → E♭ 키 후보</p><p class="note">예외: 블루스(전부 7 코드)와 세컨더리 도미넌트 → 6단계.</p>` },
-      { h: '지판에서: ⅱ → Ⅴ → Ⅰ은 한 줄씩 위로', b: `<p>ⅱ → Ⅴ → Ⅰ은 루트가 <b>4도씩 위로</b> 두 번 이동해요. 베이스에선 <b>한 줄 위 같은 프렛</b>을 두 번.</p><p>C 키: D(A현 5) → G(D현 5) → C(G현 5).</p>`,
+      { h: `지판에서: ⅱ → Ⅴ → Ⅰ은 한 줄씩 ${UP}로`, b: `<p>ⅱ → Ⅴ → Ⅰ은 루트가 <b>4도씩 위로</b> 두 번 이동해요. 베이스에선 <b>한 줄 ${UP} 같은 프렛</b>을 두 번.</p><p>C 키: D(A현 5) → G(D현 5) → C(G현 5).</p>`,
         board: { to: 7, marks: [{ s: 1, f: 5, t: 'ⅱ', c: 'soft' }, { s: 2, f: 5, t: 'Ⅴ', c: 'ok' }, { s: 3, f: 5, t: 'Ⅰ', c: 'root' }] },
         sounds: [{ label: 'Dm7 – G7 – Cmaj7', chords: progList('C', [2, 5, 1]) }] },
       { h: '마이너 키의 다이아토닉', b: `<table class="tbl"><tr><th>번호</th><th>A 마이너</th></tr>${[1, 2, 3, 4, 5, 6, 7].map(d => `<tr><td><b>${MRN[d - 1]}</b></td><td>${minDia('A', d)}</td></tr>`).join('')}</table>
@@ -755,7 +788,7 @@ const LESSONS = [
         sounds: [{ label: 'C 키', chords: progList('C', [2, 5, 1]) }, { label: 'F 키', chords: progList('F', [2, 5, 1]) }, { label: 'B♭ 키', chords: progList('B♭', [2, 5, 1]) }] },
       { h: '마이너 ⅱ–Ⅴ–ⅰ', b: `<p>Bm7♭5 – E7 – Am7. <b>m7♭5 다음에 7 코드</b>가 오면 마이너로 해결한다는 신호.</p><p>메이저 ⅱ–Ⅴ보다 어둡고 극적이에요.</p>`,
         sounds: [{ label: 'A 마이너', chords: progList('A', [2, 5, 1], MIN_Q, MIN) }, { label: 'D 마이너', chords: progList('D', [2, 5, 1], MIN_Q, MIN) }] },
-      { h: '5도권 순환 진행', b: `<p class="big">Cmaj7 → Fmaj7 → Bm7♭5 → E7 → Am7 → Dm7 → G7 → Cmaj7</p><p>루트가 <b>계속 4도 위로</b> 이동해요 (F → B만 증4도). 수많은 스탠더드의 뼈대예요.</p><p>베이스로는 한 줄씩 위로 올라가다 줄이 끝나면 옥타브 아래로 돌아와 다시.</p>`,
+      { h: '5도권 순환 진행', b: `<p class="big">Cmaj7 → Fmaj7 → Bm7♭5 → E7 → Am7 → Dm7 → G7 → Cmaj7</p><p>루트가 <b>계속 4도 위로</b> 이동해요 (F → B만 증4도). 수많은 스탠더드의 뼈대예요.</p><p>베이스로는 한 줄씩 ${UP}로(가는 줄 쪽으로) 옮겨 가다 줄이 끝나면 옥타브 아래로 돌아와 다시.</p>`,
         sounds: [{ label: '순환 진행 (C 키)', chords: progList('C', [1, 4, 7, 3, 6, 2, 5, 1], ['maj7', 'm7', 'dom', 'maj7', 'dom', 'm7', 'hd']), beat: 1.1 }] },
       { h: 'Ⅰ–ⅵ–ⅱ–Ⅴ와 팝 진행', b: `<p><b>Ⅰ–ⅵ–ⅱ–Ⅴ</b>: 턴어라운드. 끝나지 않고 계속 도는 느낌이라 곡 끝이나 반복 구간에 많아요.</p><p><b>Ⅰ–Ⅴ–ⅵ–Ⅳ</b>: 팝에서 가장 흔한 진행.</p>`,
         sounds: [{ label: 'Ⅰ–ⅵ–ⅱ–Ⅴ', chords: progList('C', [1, 6, 2, 5]) }, { label: 'Ⅰ–Ⅴ–ⅵ–Ⅳ', chords: progList('C', [1, 5, 6, 4]) }] },
@@ -963,14 +996,19 @@ function settings() {
     <main class="card">
       <label class="tog"><span>소리 켜기</span><input type="checkbox" id="snd" ${S.settings.sound ? 'checked' : ''}></label>
       <label class="tog"><span>한 옥타브 위로 재생<small>폰 스피커·작은 이어폰에서 더 잘 들려요</small></span><input type="checkbox" id="oct" ${S.settings.octUp ? 'checked' : ''}></label>
+      <label class="tog"><span>실제 베이스 소리<small>${Object.keys(samples).length ? '녹음 샘플 사용 중' : '샘플을 못 불러오면 신스 소리로 대체'}</small></span><input type="checkbox" id="real" ${S.settings.real ? 'checked' : ''}></label>
+      <label class="tog"><span>지판을 TAB 방향으로<small>끄면 연주자 시점 (E현이 위, 가는 줄이 "아래")</small></span><input type="checkbox" id="tab" ${S.settings.tabView ? 'checked' : ''}></label>
       <button class="snd" id="test">▶ 소리 테스트 (E A D G)</button>
       <p class="note">iPhone은 무음 스위치가 켜져 있으면 소리가 안 날 수 있어요.</p>
       <hr>
       <button class="danger" id="reset">진도 초기화</button>
       <p class="note">진도는 이 폰의 브라우저 안에만 저장돼요.</p>
+      ${Object.keys(samples).length ? '' : '<!--'}<p class="note">베이스 샘플: FluidR3_GM (Frank Wen), <a href="https://creativecommons.org/licenses/by/3.0/" style="text-decoration:underline">CC BY 3.0</a>, gleitz/midi-js-soundfonts 경유. 음높이 조정과 길이 편집 적용.</p>${Object.keys(samples).length ? '' : '-->'}
     </main>`;
     $('#snd').onchange = e => { S.settings.sound = e.target.checked; save(); };
     $('#oct').onchange = e => { S.settings.octUp = e.target.checked; save(); };
+    $('#real').onchange = e => { S.settings.real = e.target.checked; save(); };
+    $('#tab').onchange = e => { S.settings.tabView = e.target.checked; save(); location.reload(); };
     $('#test').onclick = () => playSeq([28, 33, 38, 43]);
     $('#reset').onclick = () => { if (confirm('진도를 모두 지울까요?')) { S.items = {}; S.lessons = {}; S.streak = { last: null, count: 0 }; save(); draw(); } };
   };
