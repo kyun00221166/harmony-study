@@ -1,4 +1,4 @@
-﻿// ?ㅽ봽?쇱씤 罹먯떆: 罹먯떆 癒쇱? 蹂댁뿬二쇨퀬, ?ㅼ뿉????踰꾩쟾 諛쏆븘?먭린
+﻿// 오프라인 캐시: 캐시 먼저 보여주고, 뒤에서 새 버전 받아두기
 const CACHE = 'hs-v4';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
