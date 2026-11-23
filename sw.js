@@ -1,5 +1,5 @@
 // 오프라인 캐시: 캐시 먼저 보여주고, 뒤에서 새 버전 받아두기
-const CACHE = 'hs-v1';
+const CACHE = 'hs-v2';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

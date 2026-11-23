@@ -25,6 +25,60 @@ const IV = {
 };
 const ivLabel = n => `${IV[n][0]} <small>${IV[n][1]}</small>`;
 
+// 조에 맞는 철자 (D 메이저의 3음 = F♯, G♭ 아님)
+const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'], NATPC = [0, 2, 4, 5, 7, 9, 11];
+const ACC = { 0: '', 1: '♯', 2: '𝄪', 11: '♭', 10: '𝄫' };
+const ACCV = { '♯': 1, '♭': -1, '𝄪': 2, '𝄫': -2 };
+const parsePc = nm => (NATPC[LETTERS.indexOf(nm[0])] + [...nm.slice(1)].reduce((a, c) => a + (ACCV[c] || 0), 0) + 12) % 12;
+function spell(root, semis, steps) {
+  const li = (LETTERS.indexOf(root[0]) + steps) % 7;
+  const pc = (parsePc(root) + semis) % 12;
+  return LETTERS[li] + ACC[(pc - NATPC[li] + 12) % 12];
+}
+const MAJ = [0, 2, 4, 5, 7, 9, 11], MIN = [0, 2, 3, 5, 7, 8, 10];
+const scaleOf = (root, f = MAJ) => f.map((s, i) => spell(root, s, i));
+// [이름, 조표(+♯ / -♭)]
+const KEYS = [['C', 0], ['G', 1], ['D', 2], ['A', 3], ['E', 4], ['B', 5], ['F♯', 6], ['F', -1], ['B♭', -2], ['E♭', -3], ['A♭', -4], ['D♭', -5]];
+const keyByPc = pc => KEYS.find(k => parsePc(k[0]) === pc)[0];
+const sigText = n => n === 0 ? '♯·♭ 없음' : n > 0 ? `♯ ${n}개` : `♭ ${-n}개`;
+const sigNotes = n => n > 0 ? ['F♯', 'C♯', 'G♯', 'D♯', 'A♯', 'E♯'].slice(0, n) : ['B♭', 'E♭', 'A♭', 'D♭', 'G♭'].slice(0, -n);
+
+// 7th 코드 4종: [반음, 알파벳 칸, 디그리]
+const CH = {
+  maj7: { sym: 'maj7', ko: '메이저7', t: [[0, 0, '1'], [4, 2, '3'], [7, 4, '5'], [11, 6, '7']], feel: '밝고 안정 · Ⅰ, Ⅳ' },
+  dom: { sym: '7', ko: '도미넌트7', t: [[0, 0, '1'], [4, 2, '3'], [7, 4, '5'], [10, 6, '♭7']], feel: '긴장, 해결하고 싶음 · Ⅴ' },
+  m7: { sym: 'm7', ko: '마이너7', t: [[0, 0, '1'], [3, 2, '♭3'], [7, 4, '5'], [10, 6, '♭7']], feel: '어둡고 부드러움 · ⅱ ⅲ ⅵ' },
+  hd: { sym: 'm7♭5', ko: '하프디미니쉬', t: [[0, 0, '1'], [3, 2, '♭3'], [6, 4, '♭5'], [10, 6, '♭7']], feel: '불안하고 어두움 · ⅶ, 마이너 ⅱ' },
+};
+const chordNotes = (root, q) => CH[q].t.map(([s, st]) => spell(root, s, st));
+// 코드 종류별로 철자가 깔끔한 루트 이름 (D♭m7♭5 같은 𝄫 피하기)
+const M7ROOTS = ['A', 'D', 'E', 'B', 'G', 'C', 'F', 'F♯', 'C♯', 'G♯', 'B♭', 'E♭'];
+const HDROOTS = ['B', 'E', 'A', 'D', 'G', 'C', 'F♯', 'C♯', 'G♯', 'D♯', 'A♯', 'F'];
+CH.maj7.roots = CH.dom.roots = KEYS.map(k => k[0]); CH.m7.roots = M7ROOTS; CH.hd.roots = HDROOTS;
+const rootName = (pc, q) => CH[q].roots.find(n => parsePc(n) === pc);
+
+// 지판 박스: 루트(s,f)에서 3음씩 한 줄씩 쌓기
+function boxMarks(s, f, semis, labels) {
+  return semis.map((n, i) => {
+    const k = Math.min(Math.floor(i / 3), 3 - s);
+    return { s: s + k, f: f + n - 5 * k, t: labels[i], c: n % 12 === 0 ? 'root' : 'ok' };
+  });
+}
+// 아르페지오 모양: 1 / 3·5는 한 줄 위 / 7은 두 줄 위
+function chordMarks(s, f, q, labels, hl) {
+  return CH[q].t.map(([n], i) => {
+    const k = [0, 1, 1, 2][i];
+    return { s: s + k, f: f + n - 5 * k, t: labels ? labels[i] : CH[q].t[i][2], c: i === 0 ? 'root' : hl == null || hl === i ? 'ok' : 'soft' };
+  });
+}
+// 이 음을 루트로 아르페지오를 그릴 수 있는 위치 (E현 또는 A현, 2~9프렛)
+function rootPos(pc, lo = 2, hi = 9) {
+  for (const s of [0, 1]) {
+    let f = (pc - STR[s].m % 12 + 12) % 12; if (f < lo) f += 12;
+    if (f <= hi) return { s, f };
+  }
+}
+
 // 음정을 베이스 지판 "모양"으로: k줄 위, diff프렛 이동
 function ivShape(n) {
   const c = [];
@@ -56,7 +110,7 @@ function audio() {
   if (actx.state === 'suspended') actx.resume();
   return actx;
 }
-function pluck(midi, when = 0, dur = 1.0) {
+function pluck(midi, when = 0, dur = 1.0, vol = 0.45) {
   if (!S.settings.sound) return;
   const c = audio();
   const t = c.currentTime + when + 0.03;
@@ -70,13 +124,19 @@ function pluck(midi, when = 0, dur = 1.0) {
   lp.frequency.exponentialRampToValueAtTime(Math.max(180, f * 2.2), t + 0.4);
   const g = c.createGain();
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.45, t + 0.008);
-  g.gain.exponentialRampToValueAtTime(0.2, t + 0.25);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(vol * 0.45, t + 0.25);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   o1.connect(lp); o2.connect(sub); sub.connect(lp); lp.connect(g); g.connect(c.destination);
   o1.start(t); o2.start(t); o1.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
 }
 const playSeq = (ms, gap = 0.65) => ms.forEach((m, i) => pluck(m, i * gap));
+// 코드: 아르페지오로 한 번, 이어서 동시에 한 번
+function playChord(ms) {
+  ms.forEach((m, i) => pluck(m, i * 0.38, 0.9));
+  const t = ms.length * 0.38 + 0.35;
+  ms.forEach(m => pluck(m, t, 1.8, 0.2));
+}
 
 /* ───────── 저장 (폰 안에만) ───────── */
 const KEY = 'harmony-study-v1';
@@ -216,6 +276,136 @@ const QUIZ = {
   ivA: ivShapeQuiz(2, '음정 모양 (전체 12개)', ALLIV, 'ivA'),
   earB: earQuiz(2, '귀로 음정 맞히기 (핵심)', BASIC, 'earB'),
   earA: earQuiz(2, '귀로 음정 맞히기 (전체)', ALLIV, 'earA'),
+
+  /* 3단계: 장음계와 조 */
+  deg: {
+    stage: 3, title: '키의 몇 번째 음? (이름)',
+    items() { const k = []; KEYS.forEach((_, i) => [2, 3, 4, 5, 6, 7].forEach(d => k.push(`dg:${i}:${d}`))); return k; },
+    make(key) {
+      const [, i, d] = key.split(':').map(Number), K = KEYS[i][0], sc = scaleOf(K), ans = sc[d - 1];
+      const p = rootPos(parsePc(K), 1, 8);
+      const marks = boxMarks(p.s, p.f, [...MAJ, 12], [...sc, K]).map((m, j) => j === d - 1 ? { ...m, c: 'ok' } : { ...m, c: j === 0 || j === 7 ? 'root' : 'soft' });
+      return {
+        prompt: `<b>${K} 메이저</b>의 <b>${d}음</b>은?`,
+        board: null, after: { marks },
+        choices: noteChoices(), correct: v => v === parsePc(ans),
+        explain: `${K} 메이저: ${sc.map((n, j) => j === d - 1 ? `<b>${n}</b>` : n).join(' ')} → ${d}음 = <b>${ans}</b>`,
+        play: () => { const r = midiAt(p.s, p.f); playSeq([r, r + MAJ[d - 1]]); },
+      };
+    },
+  },
+  degTap: {
+    stage: 3, title: '키의 몇 번째 음? (지판에서 짚기)',
+    items: () => [2, 3, 4, 5, 6, 7].map(d => `dt:${d}`),
+    make(key) {
+      const d = +key.split(':')[1], s = rnd(2), f = 1 + rnd(7), K = keyByPc(pcAt(s, f));
+      const sc = scaleOf(K), ans = sc[d - 1], ap = parsePc(ans);
+      const marks = boxMarks(s, f, [...MAJ, 12], ['1', '2', '3', '4', '5', '6', '7', '1']).map((m, j) => j === d - 1 ? { ...m, t: ans, c: 'ok' } : { ...m, c: j === 0 || j === 7 ? 'root' : 'soft' });
+      return {
+        prompt: `R = <b>${K}</b>. ${K} 메이저의 <b>${d}음</b>을 짚어보세요`,
+        board: { tap: true, marks: [{ s, f, t: 'R', c: 'root' }] }, tap: true,
+        after: { marks },
+        correct: v => pcAt(v.s, v.f) === ap,
+        explain: `${K} 메이저의 ${d}음 = <b>${ans}</b>. 메이저 스케일 박스(3음씩 한 줄)에서 ${d}번째 자리.`,
+        play: () => { const r = midiAt(s, f); playSeq([r, r + MAJ[d - 1]]); },
+      };
+    },
+  },
+  keysig: {
+    stage: 3, title: '조표 (♯·♭ 개수)',
+    items: () => KEYS.map((_, i) => `ks:${i}`),
+    make(key) {
+      const i = +key.split(':')[1], [K, n] = KEYS[i];
+      const opts = [n]; while (opts.length < 4) { const o = pick(KEYS)[1]; if (!opts.includes(o)) opts.push(o); }
+      opts.sort((a, b) => a - b);
+      return {
+        prompt: `<b>${K} 메이저</b>의 조표는?`,
+        board: null, after: null,
+        choices: opts.map(o => ({ v: o, label: sigText(o) })), correct: v => v === n,
+        explain: `${K} 메이저: ${sigText(n)}${n ? ` (${sigNotes(n).join(' ')})` : ''}. 스케일: ${scaleOf(K).join(' ')}. ` +
+          (n >= 0 ? '5도권에서 C부터 5도씩 올라갈 때마다 ♯ +1.' : 'C부터 4도씩 올라갈 때마다 ♭ +1.'),
+        play: () => { const r = 36 + parsePc(K) % 12; playSeq([...MAJ, 12].map(x => r + x), 0.22); },
+      };
+    },
+  },
+  rel: {
+    stage: 3, title: '나란한조 (메이저 ↔ 마이너)',
+    items() { const k = []; KEYS.forEach((_, i) => [0, 1].forEach(d => k.push(`rl:${i}:${d}`))); return k; },
+    make(key) {
+      const [, i, dir] = key.split(':').map(Number), K = KEYS[i][0], m = spell(K, 9, 5);
+      const ans = dir === 0 ? m : K;
+      return {
+        prompt: dir === 0 ? `<b>${K} 메이저</b>와 같은 음을 쓰는 마이너 키는?` : `<b>${m} 마이너</b>와 같은 음을 쓰는 메이저 키는?`,
+        board: null, after: null,
+        choices: noteChoices(), correct: v => v === parsePc(ans),
+        explain: `${K} 메이저 = ${m} 마이너. 메이저의 6음(${m})에서 시작하면 마이너, 마이너의 ♭3음(${K})에서 시작하면 메이저. 지판으로는 단3도(1줄 위, 2프렛 왼쪽) 관계.`,
+        play: () => { const r = 33 + (parsePc(m) - 9 + 12) % 12; playSeq([r, r + 3]); },
+      };
+    },
+  },
+
+  /* 4단계: 코드 구성음 */
+  ctone: {
+    stage: 4, title: '코드톤 이름 맞히기',
+    items() { const k = []; Object.keys(CH).forEach(q => [1, 2, 3].forEach(j => k.push(`ct:${q}:${j}`))); return k; },
+    make(key) {
+      const [, q, js] = key.split(':'), j = +js, R = pick(CH[q].roots);
+      const notes = chordNotes(R, q), ans = notes[j], lab = CH[q].t[j][2], p = rootPos(parsePc(R));
+      return {
+        prompt: `<b>${R}${CH[q].sym}</b>의 <b>${lab}음</b>은?`,
+        board: null, after: { marks: chordMarks(p.s, p.f, q, notes, j) },
+        choices: noteChoices(), correct: v => v === parsePc(ans),
+        explain: `${R}${CH[q].sym} = ${notes.map((n, x) => x === j ? `<b>${n}</b>` : n).join(' ')} (${CH[q].t.map(t => t[2]).join(' ')}) → ${lab}음 = <b>${ans}</b>`,
+        play: () => { const r = midiAt(p.s, p.f); playSeq(CH[q].t.map(t => r + t[0]), 0.35); },
+      };
+    },
+  },
+  cqual: {
+    stage: 4, title: '아르페지오 모양 → 코드 종류',
+    items: () => Object.keys(CH).map(q => `cq:${q}`),
+    make(key) {
+      const q = key.split(':')[1], s = rnd(2), f = 2 + rnd(7), R = rootName(pcAt(s, f), q);
+      return {
+        prompt: `R에서 시작하는 이 아르페지오는 무슨 코드?`,
+        board: { marks: chordMarks(s, f, q, ['R', '', '', '']).map((m, i) => i ? { ...m, c: 'ask' } : m) },
+        after: { marks: chordMarks(s, f, q) },
+        choices: Object.keys(CH).map(k => ({ v: k, label: `${CH[k].ko} <small>${CH[k].sym}</small>` })), correct: v => v === q,
+        explain: `<b>${R}${CH[q].sym}</b> = ${chordNotes(R, q).join(' ')} (${CH[q].t.map(t => t[2]).join(' ')}). ${CH[q].feel}.`,
+        play: () => { const r = midiAt(s, f); playSeq(CH[q].t.map(t => r + t[0]), 0.35); },
+      };
+    },
+  },
+  earT: {
+    stage: 4, title: '귀로 듣기: 메이저 vs 마이너', ear: true,
+    items: () => ['et:maj', 'et:min'],
+    make(key) {
+      const t = key.split(':')[1], r = 40 + rnd(8), tri = t === 'maj' ? [0, 4, 7] : [0, 3, 7];
+      const p = rootPos(r % 12), R = rootName(r % 12, t === 'maj' ? 'maj7' : 'm7');
+      const play = () => playChord(tri.map(x => r + x));
+      return {
+        prompt: `이 코드는 밝아요, 어두워요? 🎧`, listen: true, autoplay: true, board: null,
+        after: { marks: chordMarks(p.s, p.f, t === 'maj' ? 'maj7' : 'm7').slice(0, 3) },
+        choices: [{ v: 'maj', label: '메이저 <small>밝음</small>' }, { v: 'min', label: '마이너 <small>어두움</small>' }], correct: v => v === t,
+        explain: t === 'maj' ? `<b>메이저</b> (${R} ${spell(R, 4, 2)} ${spell(R, 7, 4)}). 3음이 장3도 → 밝은 소리.` : `<b>마이너</b> (${R} ${spell(R, 3, 2)} ${spell(R, 7, 4)}). 3음이 단3도 → 어두운 소리.`,
+        play,
+      };
+    },
+  },
+  earQ: {
+    stage: 4, title: '귀로 듣기: 7th 코드 4종', ear: true,
+    items: () => Object.keys(CH).map(q => `eq:${q}`),
+    make(key) {
+      const q = key.split(':')[1], r = 40 + rnd(8), p = rootPos(r % 12), R = rootName(r % 12, q);
+      const play = () => playChord(CH[q].t.map(t => r + t[0]));
+      return {
+        prompt: `무슨 코드일까요? 🎧`, listen: true, autoplay: true, board: null,
+        after: { marks: chordMarks(p.s, p.f, q) },
+        choices: Object.keys(CH).map(k => ({ v: k, label: `${CH[k].ko} <small>${CH[k].sym}</small>` })), correct: v => v === q,
+        explain: `<b>${CH[q].ko} (${R}${CH[q].sym})</b>: ${CH[q].feel}. 구별 요령: 3음이 밝은가 어두운가 → 7음이 날카로운가(7) 부드러운가(♭7) → ♭5의 불안함.`,
+        play,
+      };
+    },
+  },
 };
 
 function ivShapeQuiz(stage, title, set, p) {
@@ -306,10 +496,57 @@ const LESSONS = [
         sounds: [{ label: 'P4', seq: [36, 41] }, { label: 'P5', seq: [36, 43] }, { label: 'P8', seq: [36, 48] }, { label: 'M3', seq: [36, 40] }, { label: 'M6', seq: [36, 45] }] },
     ],
   },
+  {
+    id: 'l3', stage: 3, title: '장음계 · 단음계 · 조', quizzes: ['deg', 'degTap', 'keysig', 'rel'],
+    cards: [
+      { h: '스케일 = 규칙대로 고른 음 7개', b: `<p>12음 중 7개를 골라 쓰는 <b>팔레트</b>예요. 가장 기본이 <b>장음계(메이저 스케일)</b>.</p><p class="big">온 · 온 · 반 · 온 · 온 · 온 · 반</p><p>이 공식만 알면 <b>어느 음에서 시작해도</b> 메이저 스케일을 만들 수 있어요. 베이스에선 온=2프렛, 반=1프렛.</p>` },
+      { h: 'C 메이저 = C D E F G A B', b: `<p>♯·♭이 하나도 없는 유일한 메이저. A현 3프렛(C)에서 시작하는 <b>3음씩 한 줄</b> 박스 모양을 손에 익혀요.</p>`,
+        board: { to: 9, marks: boxMarks(1, 3, [...MAJ, 12], [...scaleOf('C'), 'C']) },
+        sounds: [{ label: 'C 메이저 스케일', seq: [...MAJ, 12].map(x => 36 + x) }] },
+      { h: '이 모양은 어디로든 옮길 수 있다', b: `<p>똑같은 모양을 E현 3프렛(G)에서 시작하면 <b>G 메이저</b>. 키가 바뀌어도 <b>모양은 그대로</b>, 위치만 이동. 베이스의 큰 장점이에요.</p><p>그래서 음 이름보다 <b>번호(1~7)</b>로 외워두면 모든 키에서 써먹을 수 있어요.</p>`,
+        board: { to: 9, marks: boxMarks(0, 3, [...MAJ, 12], ['1', '2', '3', '4', '5', '6', '7', '1']) },
+        sounds: [{ label: 'G 메이저 스케일', seq: [...MAJ, 12].map(x => 31 + x) }] },
+      { h: '음 번호 = 디그리', b: `<p>스케일 음에 번호를 붙여요. C 메이저면 C=1, D=2, E=3 … B=7.</p><p>코드도 솔로도 <b>전부 번호로 말해요</b>: "메이저 코드 = 1·3·5", "3음에 착지", "♭7". 키가 바뀌어도 번호의 <b>역할과 소리 느낌</b>은 같아요.</p><p class="note">귀 훈련 팁: 1은 집, 7은 1로 가고 싶어 안달, 4는 3으로 내려가고 싶어함.</p>`,
+        sounds: [{ label: '7 → 1 (해결)', seq: [47, 48] }, { label: '4 → 3', seq: [41, 40] }, { label: '1-3-5', seq: [36, 40, 43] }] },
+      { h: '조(Key) = 곡의 중심', b: `<p>"이 곡 키가 G야" = <b>G가 집(중심)</b>이고 G 메이저 스케일 음을 주로 쓴다는 뜻.</p><p>G 메이저 = G A B C D E <b>F♯</b> → ♯가 1개. 이렇게 키마다 붙는 ♯·♭을 <b>조표</b>라고 해요.</p><p class="note">철자 규칙: 스케일엔 알파벳이 한 번씩만 나와요. 그래서 G 메이저의 7음은 G♭이 아니라 F♯.</p>` },
+      { h: '5도권: 키들의 지도', b: `<p>C에서 <b>5도씩 올라가면</b> ♯가 하나씩 늘어요.</p><p class="big">C → G → D → A → E → B → F♯</p><p><b>4도씩 올라가면</b>(=5도 아래) ♭가 하나씩.</p><p class="big">C → F → B♭ → E♭ → A♭ → D♭</p><p><b>재즈 코드 진행은 이 4도 방향으로 많이 움직여요</b> (6단계). 베이스에서 4도 위 = 한 줄 위 같은 프렛이라 손이 쉽게 따라가요.</p>`,
+        sounds: [{ label: '4도씩: C F B♭ E♭', seq: [36, 41, 46, 51] }] },
+      { h: '나란한조: C 메이저 = A 마이너', b: `<p>C 메이저의 <b>6음(A)</b>에서 시작하면 A 자연단음계. 음은 똑같고 중심만 달라요.</p><p class="big">1 2 ♭3 4 5 ♭6 ♭7</p><p>메이저 공식과 비교해 3·6·7음이 반음 낮아요 → 어두운 소리. 그림은 E현 5프렛(A)에서 시작하는 마이너 박스.</p>`,
+        board: { to: 9, marks: boxMarks(0, 5, [...MIN, 12], ['1', '2', '♭3', '4', '5', '♭6', '♭7', '1']) },
+        sounds: [{ label: 'A 마이너 스케일', seq: [...MIN, 12].map(x => 33 + x) }, { label: 'C 메이저 (같은 음)', seq: [...MAJ, 12].map(x => 36 + x) }] },
+      { h: '솔로에서는?', b: `<p>곡의 키 스케일 7음 = 일단 <b>크게 틀리지 않는 음</b>.</p><p>그런데 7음의 무게가 다 같지는 않아요. <b>지금 울리는 코드의 구성음</b>이 가장 강하게 맞아요. 그게 다음 단계(코드톤)예요.</p><p class="note">🎸 집 연습: 키 하나를 정하고 박스 안의 음만으로 4마디 흥얼거리듯 쳐보기. 끝은 항상 1음으로.</p>` },
+    ],
+  },
+  {
+    id: 'l4', stage: 4, title: '코드 구성음 (코드톤)', quizzes: ['ctone', 'cqual', 'earT', 'earQ'],
+    cards: [
+      { h: '코드 = 3도씩 쌓은 음', b: `<p>스케일에서 <b>한 칸씩 건너뛰며</b> 쌓아요: 1 · 3 · 5 = <b>트라이어드</b>(3화음).</p><p>그 위에 7을 하나 더 얹으면 <b>7th 코드</b>(4화음). 재즈 차트는 거의 전부 7th 코드예요.</p><p>이 음들을 <b>코드톤</b>이라고 불러요.</p>` },
+      { h: '메이저 vs 마이너: 3음 하나 차이', b: `<p><b>메이저</b> 1 · 3 · 5 → 밝음<br><b>마이너</b> 1 · ♭3 · 5 → 어두움</p><p>2단계에서 본 장3도/단3도가 바로 이거예요. 지판에선 3음이 <b>한 프렛</b> 차이.</p>`,
+        board: { to: 7, marks: [{ s: 1, f: 3, t: 'C', c: 'root' }, { s: 2, f: 2, t: '3', c: 'ok' }, { s: 2, f: 1, t: '♭3', c: 'soft' }, { s: 2, f: 5, t: '5', c: 'ok' }] },
+        sounds: [{ label: 'C 메이저', seq: [36, 40, 43] }, { label: 'C 마이너', seq: [36, 39, 43] }] },
+      { h: '7th 코드 4종 (C 기준)', b: `<table class="tbl"><tr><th>기호</th><th>구성</th><th>C 예시</th><th></th></tr>
+        ${Object.keys(CH).map(q => `<tr><td><b>C${CH[q].sym}</b><br><small>${CH[q].ko}</small></td><td>${CH[q].t.map(t => t[2]).join(' ')}</td><td>${chordNotes('C', q).join(' ')}</td><td><button class="mini" data-seq="${CH[q].t.map(t => 36 + t[0]).join(',')}">▶</button></td></tr>`).join('')}</table>
+        <p class="note">다른 표기: Cmaj7 = CΔ7, Cm7 = C-7, Cm7♭5 = Cø</p>` },
+      { h: 'maj7: 밝고 안정', b: `<p>1 · 3 · 5 · <b>7</b>. 7음이 루트 바로 반음 아래라 살짝 몽환적. 주로 <b>Ⅰ, Ⅳ</b> 자리.</p><p>모양: 3은 한 줄 위 1프렛 왼쪽, 5는 한 줄 위 2프렛 오른쪽, 7은 두 줄 위 1프렛 오른쪽.</p>`,
+        board: { to: 7, marks: chordMarks(1, 3, 'maj7') }, sounds: [{ label: 'Cmaj7', seq: [36, 40, 43, 47] }] },
+      { h: '7 (도미넌트): 긴장', b: `<p>1 · 3 · 5 · <b>♭7</b>. 3음과 ♭7음 사이가 <b>트라이톤</b> → 불안정 → 다음 코드로 풀리고 싶어해요.</p><p><b>Ⅴ7 → Ⅰ</b>(G7 → C)이 화성의 엔진이에요. 솔로에서 이 "풀림"을 들려주는 게 핵심.</p>`,
+        board: { to: 7, marks: chordMarks(1, 3, 'dom') }, sounds: [{ label: 'C7', seq: [36, 40, 43, 46] }, { label: 'G7 → C (해결)', seq: [31, 35, 38, 41, 36] }] },
+      { h: 'm7: 어둡고 부드러움', b: `<p>1 · <b>♭3</b> · 5 · <b>♭7</b>. 재즈에서 가장 흔한 코드 중 하나. 주로 <b>ⅱ, ⅲ, ⅵ</b> 자리.</p>`,
+        board: { to: 7, marks: chordMarks(1, 3, 'm7') }, sounds: [{ label: 'Cm7', seq: [36, 39, 43, 46] }] },
+      { h: 'm7♭5: 불안하고 어두움', b: `<p>1 · ♭3 · <b>♭5</b> · ♭7. 5음까지 반음 내려가 불안한 소리. 메이저 키의 <b>ⅶ</b>, 그리고 <b>마이너 키의 ⅱ</b>(마이너 ⅱ–Ⅴ–ⅰ)에서 나와요.</p>`,
+        board: { to: 7, marks: chordMarks(1, 3, 'hd') }, sounds: [{ label: 'Cm7♭5', seq: [36, 39, 42, 46] }] },
+      { h: '솔로에서: 코드톤 = 착지점', b: `<p>코드가 바뀌는 순간 <b>그 코드의 코드톤에 착지</b>하면 반주 없이도 진행이 들려요. 이게 "진행을 따라가는 솔로"의 기본.</p><p>특히 <b>3음과 7음</b>(가이드톤)이 코드 성격을 결정해요 → 8단계.</p><p class="note">🎸 집 연습: 코드 하나 정해 아르페지오를 위아래로 → 순서를 섞어서 → 리듬을 넣어 즉흥. 각 2분.</p>` },
+    ],
+  },
 ];
 const ROADMAP = [
-  [3, '장음계와 조 (Key)'], [4, '코드 구성음 · 아르페지오'], [5, '다이아토닉 코드 · 로마숫자'],
-  [6, '자주 쓰는 코드 진행'], [7, '베이스 라인 만들기'], [8, '모드 (도리안 · 믹솔리디안)'],
+  [5, '다이아토닉 코드 · 로마숫자'], [6, '코드 진행 읽기: 5도권 · ⅱ–Ⅴ–Ⅰ · 블루스'],
+  [7, '펜타토닉 · 블루스 스케일 (첫 즉흥)'], [8, '코드톤 솔로 · 가이드톤'], [9, '접근음 · 크로매틱 연결'],
+  [10, '코드-스케일 (도리안 · 믹솔리디안 · 하모닉 마이너)'], [11, '리듬 · 프레이징'], ['🎯', '곡 적용: 차트 보고 솔로'],
+];
+const EAR_TRACK = [
+  ['E1', '음정 듣기', true], ['E2', '코드 성질 듣기', true], ['E3', '스케일 디그리 듣기 (키 위에서 몇 음?)', false],
+  ['E4', '코드 진행 듣기', false], ['E5', '프레이즈 받아치기', false],
 ];
 
 /* ───────── 화면들 ───────── */
@@ -333,6 +570,8 @@ function home() {
       <a class="row" href="#/settings">⚙️ 설정</a></section>
     <section class="stage soon"><h2>다음 단계 (준비 중)</h2>
       ${ROADMAP.map(([n, t]) => `<div class="row"><span><span class="num sm">${n}</span>${t}</span></div>`).join('')}</section>
+    <section class="stage soon"><h2>🎧 귀 훈련 트랙</h2>
+      ${EAR_TRACK.map(([n, t, ok]) => `<div class="row ${ok ? 'have' : ''}"><span><span class="num sm">${n}</span>${t}</span><span class="pct">${ok ? '✓ 있음' : '준비 중'}</span></div>`).join('')}</section>
   </main>`;
   const t = $('#hideTip'); if (t) t.onclick = () => { S.hideInstall = true; save(); home(); };
 }
@@ -421,7 +660,7 @@ function runQuiz(ids, title) {
   };
   const answer = (v, btn) => {
     if (answered) return;
-    if (q.tap && v.s !== q.tapString) return;
+    if (q.tap && q.tapString != null && v.s !== q.tapString) return;
     answered = true;
     const ok = q.correct(v);
     grade(q.key, ok);
@@ -432,8 +671,8 @@ function runQuiz(ids, title) {
       b.disabled = true;
     });
     let after = q.after;
-    if (q.tap && !ok) after = { ...after, marks: [...after.marks, { s: v.s, f: v.f, t: '✕', c: 'bad' }] };
-    $('.boardwrap').innerHTML = board(after);
+    if (after && q.tap && !ok) after = { ...after, marks: [...after.marks, { s: v.s, f: v.f, t: '✕', c: 'bad' }] };
+    $('.boardwrap').innerHTML = after ? board(after) : '';
     $('.feedback').innerHTML = `<p class="${ok ? 'ok' : 'no'}"><b>${ok ? '정답!' : '아쉬워요'}</b> ${q.explain}</p>`;
     if (!q.listen) q.play(); else if (!ok) setTimeout(q.play, 300);
     const nb = $('.next'); nb.classList.remove('hidden');

@@ -47,6 +47,9 @@ small { color: var(--mute); font-weight: 400; font-size: .78em; }
 .done { color: var(--ok); font-size: 13px; }
 .new { color: var(--accent); font-size: 13px; }
 .soon .row { color: var(--mute); background: transparent; border: 1px solid var(--panel2); }
+.soon .row.have { color: var(--text); }
+.num.sm { flex: none; }
+.num.sm + * { vertical-align: middle; }
 
 /* 카드 · 퀴즈 */
 .card, .quiz, .result { padding: 4px 16px 24px; flex: 1; }
