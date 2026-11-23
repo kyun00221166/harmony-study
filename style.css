@@ -100,6 +100,13 @@ small { color: var(--mute); font-weight: 400; font-size: .78em; }
 .choice.wrong { background: var(--no); color: #200; }
 .choice small { color: inherit; opacity: .7; }
 .next { width: 100%; margin-top: 12px; }
+.choices.wide { grid-template-columns: 1fr; }
+.chart { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.chart span { background: var(--panel); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 12px; font-size: 18px; font-weight: 800; color: var(--text); }
+.chart span.q { border-color: var(--mute); color: var(--mute); }
+.grid12b { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 8px 0; }
+.grid12b span { background: var(--panel); border-radius: 6px; padding: 8px 4px; text-align: center; font-weight: 700; font-size: 14px; }
+.grid12b span.iv { background: #2b3550; } .grid12b span.v { background: #4a2e2e; }
 .hidden { display: none; }
 
 .primary, .btn, .pager button, .snd, .danger { border-radius: 14px; padding: 16px; font-size: 17px; font-weight: 700; text-align: center; }

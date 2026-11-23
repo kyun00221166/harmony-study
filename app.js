@@ -56,6 +56,47 @@ const M7ROOTS = ['A', 'D', 'E', 'B', 'G', 'C', 'F', 'F♯', 'C♯', 'G♯', 'B�
 const HDROOTS = ['B', 'E', 'A', 'D', 'G', 'C', 'F♯', 'C♯', 'G♯', 'D♯', 'A♯', 'F'];
 CH.maj7.roots = CH.dom.roots = KEYS.map(k => k[0]); CH.m7.roots = M7ROOTS; CH.hd.roots = HDROOTS;
 const rootName = (pc, q) => CH[q].roots.find(n => parsePc(n) === pc);
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+// 정답 1개 + 오답(중복 없이) 섞기
+function opts(ans, wrongs, n = 4) {
+  const out = [ans];
+  for (const w of shuffle([...wrongs])) { if (out.length >= n) break; if (!out.includes(w)) out.push(w); }
+  return shuffle(out).map(v => ({ v, label: v }));
+}
+
+// 다이아토닉 코드 (메이저 키 / 마이너 키)
+const DIA_Q = ['maj7', 'm7', 'm7', 'maj7', 'dom', 'm7', 'hd'];
+const RN = ['Ⅰ', 'ⅱ', 'ⅲ', 'Ⅳ', 'Ⅴ', 'ⅵ', 'ⅶ'];
+const RNQ = ['Ⅰmaj7', 'ⅱm7', 'ⅲm7', 'Ⅳmaj7', 'Ⅴ7', 'ⅵm7', 'ⅶm7♭5'];
+const FUNC = ['토닉', '서브도미넌트', '토닉', '서브도미넌트', '도미넌트', '토닉', '도미넌트'];
+const FUNC_DESC = { 토닉: '집, 안정', 서브도미넌트: '집을 떠나 출발', 도미넌트: '긴장, 집으로 돌아가려 함' };
+const MIN_Q = ['m7', 'hd', 'maj7', 'm7', 'dom', 'maj7', 'dom'];
+const MRN = ['ⅰm7', 'ⅱm7♭5', '♭Ⅲmaj7', 'ⅳm7', 'Ⅴ7', '♭Ⅵmaj7', '♭Ⅶ7'];
+const MAJ_KEYS = ['C', 'G', 'D', 'A', 'E', 'F', 'B♭', 'E♭', 'A♭'];
+const MIN_KEYS = ['A', 'E', 'B', 'D', 'G', 'C', 'F♯', 'F'];
+const dia = (K, d) => scaleOf(K)[d - 1] + CH[DIA_Q[d - 1]].sym;
+const minDia = (m, d) => scaleOf(m, MIN)[d - 1] + CH[MIN_Q[d - 1]].sym;
+const PROGS = [
+  { rn: 'Ⅰ – Ⅳ – Ⅴ – Ⅰ', d: [1, 4, 5, 1], note: '가장 기본. 록·팝·블루스' },
+  { rn: 'ⅱ – Ⅴ – Ⅰ', d: [2, 5, 1], note: '재즈의 기본 단위' },
+  { rn: 'Ⅰ – ⅵ – ⅱ – Ⅴ', d: [1, 6, 2, 5], note: '턴어라운드. 끝없이 반복되는 느낌' },
+  { rn: 'Ⅰ – Ⅴ – ⅵ – Ⅳ', d: [1, 5, 6, 4], note: '팝 진행' },
+];
+const BLUES = [1, 1, 1, 1, 4, 4, 1, 1, 5, 4, 1, 5];
+// 진행 재생: 베이스 루트 + 위에 코드
+function playChords(list, beat = 1.25) { // list: [[루트 midi, 코드종류], ...]
+  list.forEach(([r, q], i) => {
+    const t = i * beat;
+    pluck(r > 45 ? r - 12 : r, t, beat, 0.5);
+    CH[q].t.slice(1).forEach(([n]) => pluck(r + 12 + n, t + 0.02, beat * 0.95, 0.16));
+  });
+}
+// 키 + 로마숫자 디그리 → [[루트 midi, 코드종류], ...]
+function progList(K, degs, qs = DIA_Q, sc = MAJ) {
+  const base = 33 + (parsePc(K) - 9 + 12) % 12; // A1~G♯2
+  return degs.map(d => [base + sc[d - 1], qs[d - 1]]);
+}
+const playProg = (K, degs, qs, sc, beat) => playChords(progList(K, degs, qs, sc), beat);
 
 // 지판 박스: 루트(s,f)에서 3음씩 한 줄씩 쌓기
 function boxMarks(s, f, semis, labels) {
@@ -406,6 +447,149 @@ const QUIZ = {
       };
     },
   },
+
+  /* 5단계: 다이아토닉 코드 · 로마숫자 */
+  dia: {
+    stage: 5, title: '로마숫자 → 코드 이름',
+    items() { const k = []; MAJ_KEYS.forEach(K => [1, 2, 3, 4, 5, 6, 7].forEach(d => k.push(`dia:${K}:${d}`))); return k; },
+    make(key) {
+      const [, K, ds] = key.split(':'), d = +ds, ans = dia(K, d), root = scaleOf(K)[d - 1];
+      const wrong = [...Object.keys(CH).map(q => root + CH[q].sym), ...[1, 2, 3, 4, 5, 6, 7].map(x => dia(K, x))];
+      return {
+        prompt: `<b>${K} 메이저</b> 키의 <b>${RNQ[d - 1]}</b>는?`, board: null, after: null,
+        choices: opts(ans, wrong), correct: v => v === ans,
+        explain: `${K} 키: ${[1, 2, 3, 4, 5, 6, 7].map(x => x === d ? `<b>${dia(K, x)}</b>` : dia(K, x)).join(' ')}. 순서는 늘 maj7 m7 m7 maj7 7 m7 m7♭5.`,
+        play: () => playProg(K, [d]),
+      };
+    },
+  },
+  rn: {
+    stage: 5, title: '코드 이름 → 로마숫자',
+    items() { const k = []; MAJ_KEYS.forEach(K => [1, 2, 3, 4, 5, 6, 7].forEach(d => k.push(`rn:${K}:${d}`))); return k; },
+    make(key) {
+      const [, K, ds] = key.split(':'), d = +ds;
+      return {
+        prompt: `<b>${K} 메이저</b> 키에서 <b>${dia(K, d)}</b>는 몇 번 코드?`, board: null, after: null,
+        choices: RNQ.map((r, i) => ({ v: i + 1, label: r })), correct: v => v === d,
+        explain: `${dia(K, d)}의 루트 ${scaleOf(K)[d - 1]}는 ${K} 메이저의 ${d}음 → <b>${RNQ[d - 1]}</b>.`,
+        play: () => playProg(K, [d]),
+      };
+    },
+  },
+  func: {
+    stage: 5, title: '코드의 역할 (기능)',
+    items() { const k = []; ['C', 'G', 'F', 'B♭'].forEach(K => [1, 2, 3, 4, 5, 6, 7].forEach(d => k.push(`fn:${K}:${d}`))); return k; },
+    make(key) {
+      const [, K, ds] = key.split(':'), d = +ds, f = FUNC[d - 1];
+      return {
+        prompt: `<b>${K}</b> 키의 <b>${dia(K, d)}</b> (${RNQ[d - 1]})는 어떤 역할?`, board: null, after: null,
+        choices: ['토닉', '서브도미넌트', '도미넌트'].map(v => ({ v, label: `${v} <small>${FUNC_DESC[v]}</small>` })), correct: v => v === f,
+        explain: `${RNQ[d - 1]} = <b>${f}</b>. 토닉 Ⅰ ⅲ ⅵ / 서브도미넌트 ⅱ Ⅳ / 도미넌트 Ⅴ ⅶ. 흐름은 보통 서브도미넌트 → 도미넌트 → 토닉.`,
+        play: () => playProg(K, [d]),
+      };
+    },
+  },
+  findKey: {
+    stage: 5, title: '진행 보고 키 찾기',
+    items() { const k = []; [[2, 5, 1], [1, 6, 2, 5], [1, 4, 5, 1], [6, 2, 5, 1], [3, 6, 2, 5], [4, 5, 3, 6]].forEach((p, i) => k.push(`fk:${i}`)); return k; },
+    make(key) {
+      const P = [[2, 5, 1], [1, 6, 2, 5], [1, 4, 5, 1], [6, 2, 5, 1], [3, 6, 2, 5], [4, 5, 3, 6]][+key.split(':')[1]];
+      const K = pick(MAJ_KEYS), up4 = spell(K, 5, 3), up5 = spell(K, 7, 4);
+      const V = scaleOf(K)[4];
+      return {
+        prompt: `이 진행의 키는?<div class="chart">${P.map(d => `<span>${dia(K, d)}</span>`).join('')}</div>`, board: null, after: null,
+        choices: opts(K, [up4, up5, ...MAJ_KEYS.filter(x => x !== K)]).map(c => ({ ...c, label: `${c.v} 메이저` })), correct: v => v === K,
+        explain: `<b>${K} 메이저</b>: ${P.map(d => `${dia(K, d)}=${RNQ[d - 1]}`).join(', ')}. 요령: <b>7 코드(${V}7)</b>를 찾으면 그게 Ⅴ, 그 4도 위(${K})가 Ⅰ.`,
+        play: () => playProg(K, P),
+      };
+    },
+  },
+
+  /* 6단계: 코드 진행 읽기 */
+  iivi: {
+    stage: 6, title: 'ⅱ–Ⅴ–Ⅰ 만들기 (메이저/마이너)',
+    items() { return [...MAJ_KEYS.map(K => `iv:${K}:M`), ...MIN_KEYS.map(m => `iv:${m}:m`)]; },
+    make(key) {
+      const [, K, t] = key.split(':');
+      const majIIVI = k => `${dia(k, 2)} – ${dia(k, 5)} – ${dia(k, 1)}`;
+      const minIIVI = m => `${minDia(m, 2)} – ${minDia(m, 5)} – ${minDia(m, 1)}`;
+      let ans, wrong, label, explain, play;
+      if (t === 'M') {
+        ans = majIIVI(K); label = `${K} 메이저`;
+        wrong = [majIIVI(spell(K, 5, 3)), majIIVI(spell(K, 7, 4)), `${scaleOf(K)[1]}maj7 – ${scaleOf(K)[4]}7 – ${K}m7`, `${scaleOf(K)[1]}m7 – ${scaleOf(K)[4]}maj7 – ${K}maj7`];
+        explain = `<b>${ans}</b>. ⅱm7 → Ⅴ7 → Ⅰmaj7. 루트가 4도 위로 두 번 이동 (베이스: 한 줄 위 같은 프렛).`;
+        play = () => playProg(K, [2, 5, 1]);
+      } else {
+        ans = minIIVI(K); label = `${K} 마이너`;
+        wrong = [minIIVI(spell(K, 5, 3)), `${scaleOf(K, MIN)[1]}m7 – ${scaleOf(K, MIN)[4]}7 – ${K}maj7`, `${scaleOf(K, MIN)[1]}m7♭5 – ${scaleOf(K, MIN)[4]}m7 – ${K}m7`];
+        explain = `<b>${ans}</b>. ⅱm7♭5 → Ⅴ7 → ⅰm7. Ⅴ7의 3음(${spell(K, 11, 6)})은 단음계에 없는 음. 이 긴장이 ⅰ로 끌어당겨요.`;
+        play = () => playProg(K, [2, 5, 1], MIN_Q, [0, 2, 3, 5, 7, 8, 10]);
+      }
+      return {
+        prompt: `<b>${label}</b>의 ⅱ–Ⅴ–${t === 'M' ? 'Ⅰ' : 'ⅰ'}는?`, board: null, after: null,
+        choices: opts(ans, wrong), correct: v => v === ans, explain, play,
+      };
+    },
+  },
+  next: {
+    stage: 6, title: '다음 코드 예측하기',
+    items: () => ['nx:iiV', 'nx:V', 'nx:miiV', 'nx:sec', 'nx:cyc'],
+    make(key) {
+      const t = key.split(':')[1];
+      let K, given, ans, wrong, why, play;
+      if (t === 'miiV') {
+        K = pick(MIN_KEYS); given = [minDia(K, 2), minDia(K, 5)]; ans = minDia(K, 1);
+        wrong = [K + 'maj7', K + '7', minDia(K, 4), minDia(K, 6)];
+        why = `마이너 ⅱ–Ⅴ는 ⅰm7으로 해결.`;
+        play = () => playProg(K, [2, 5, 1], MIN_Q, MIN);
+      } else {
+        K = pick(MAJ_KEYS);
+        const sc = scaleOf(K);
+        if (t === 'iiV') { given = [dia(K, 2), dia(K, 5)]; ans = dia(K, 1); why = 'ⅱ–Ⅴ 다음은 Ⅰ. 가장 흔한 해결.'; play = () => playProg(K, [2, 5, 1]); }
+        if (t === 'V') { given = [dia(K, 5)]; ans = dia(K, 1); why = 'Ⅴ7은 4도 위(Ⅰ)로 가려고 해요.'; play = () => playProg(K, [5, 1]); }
+        if (t === 'sec') {
+          const sec = spell(sc[1], 7, 4) + '7'; given = [dia(K, 1), sec]; ans = dia(K, 2);
+          why = `${sec}는 ${K} 키에 없는 코드(3음 ${spell(sc[1], 11, 6)}가 키 밖). ${sc[1]}m7의 Ⅴ7 역할 = <b>세컨더리 도미넌트</b>. 그래서 4도 위 ${ans}로 가요.`;
+          play = () => { playProg(K, [1, 6], ['maj7', 'm7', 'm7', 'maj7', 'dom', 'dom', 'hd']); setTimeout(() => playProg(K, [2]), 2500); };
+        }
+        if (t === 'cyc') { given = [dia(K, 1), dia(K, 4), dia(K, 7), sc[2] + '7']; ans = dia(K, 6); why = `다이아토닉 5도권 순환: 루트가 계속 4도 위로. ${sc[2]}7은 ${sc[5]}m7로 가는 세컨더리 도미넌트.`; play = () => playProg(K, [1, 4, 7, 3, 6], ['maj7', 'm7', 'dom', 'maj7', 'dom', 'm7', 'hd']); }
+        wrong = [1, 2, 3, 4, 5, 6, 7].map(x => dia(K, x)).concat([sc[0] + 'm7', sc[5] + 'maj7', sc[1] + '7']);
+      }
+      return {
+        prompt: `다음에 올 가능성이 가장 높은 코드는?<div class="chart">${given.map(c => `<span>${c}</span>`).join('')}<span class="q">?</span></div>`, board: null, after: null,
+        choices: opts(ans, wrong), correct: v => v === ans,
+        explain: `<b>${ans}</b>. ${why}`, play,
+      };
+    },
+  },
+  blues: {
+    stage: 6, title: '12마디 블루스 외우기',
+    items: () => BLUES.map((_, i) => `bl:${i + 1}`),
+    make(key) {
+      const n = +key.split(':')[1], K = pick(['F', 'B♭', 'C', 'G', 'A', 'E']), sc = scaleOf(K);
+      const nm = d => sc[d - 1] + '7', ans = nm(BLUES[n - 1]);
+      const grid = BLUES.map((d, i) => i + 1 === n ? `<b>${nm(d)}</b>` : nm(d));
+      return {
+        prompt: `<b>${K} 블루스</b>의 <b>${n}번째 마디</b> 코드는?`, board: null, after: null,
+        choices: [1, 4, 5].map(d => ({ v: nm(d), label: `${nm(d)} <small>${['', 'Ⅰ7', '', '', 'Ⅳ7', 'Ⅴ7'][d]}</small>` })), correct: v => v === ans,
+        explain: `${grid.slice(0, 4).join(' ')} | ${grid.slice(4, 8).join(' ')} | ${grid.slice(8).join(' ')}. 블루스는 모든 코드가 도미넌트7.`,
+        play: () => playProg(K, [BLUES[n - 1]], ['dom', 'dom', 'dom', 'dom', 'dom', 'dom', 'dom']),
+      };
+    },
+  },
+  earProg: {
+    stage: 6, title: '귀로 듣기: 코드 진행', ear: true,
+    items: () => PROGS.map((_, i) => `ep:${i}`),
+    make(key) {
+      const P = PROGS[+key.split(':')[1]], K = pick(['C', 'F', 'G', 'D', 'B♭']);
+      return {
+        prompt: `어떤 진행일까요? 🎧`, listen: true, autoplay: true, board: null, after: null,
+        choices: PROGS.map(p => ({ v: p.rn, label: p.rn })), correct: v => v === P.rn,
+        explain: `<b>${P.rn}</b> (${K} 키: ${P.d.map(d => dia(K, d)).join(' – ')}). ${P.note}. 요령: 베이스(루트)의 움직임을 따라 들어요.`,
+        play: () => playProg(K, P.d),
+      };
+    },
+  },
 };
 
 function ivShapeQuiz(stage, title, set, p) {
@@ -538,15 +722,62 @@ const LESSONS = [
       { h: '솔로에서: 코드톤 = 착지점', b: `<p>코드가 바뀌는 순간 <b>그 코드의 코드톤에 착지</b>하면 반주 없이도 진행이 들려요. 이게 "진행을 따라가는 솔로"의 기본.</p><p>특히 <b>3음과 7음</b>(가이드톤)이 코드 성격을 결정해요 → 8단계.</p><p class="note">🎸 집 연습: 코드 하나 정해 아르페지오를 위아래로 → 순서를 섞어서 → 리듬을 넣어 즉흥. 각 2분.</p>` },
     ],
   },
+  {
+    id: 'l5', stage: 5, title: '다이아토닉 코드 · 로마숫자', quizzes: ['dia', 'rn', 'func', 'findKey'],
+    cards: [
+      { h: '다이아토닉 코드 = 키 안의 코드 7개', b: `<p>스케일 각 음 위에 <b>그 스케일 음만으로</b> 3도씩 쌓으면 코드가 7개 생겨요. 이게 그 키의 <b>가족</b>이에요.</p><p>대부분의 곡은 이 7개 위주로 굴러가요. 그래서 이걸 알면 차트의 70%는 "아는 코드"가 돼요.</p>` },
+      { h: 'C 메이저 키의 7개 코드', b: `<table class="tbl"><tr><th>번호</th><th>코드</th><th>구성</th><th></th></tr>
+        ${[1, 2, 3, 4, 5, 6, 7].map(d => `<tr><td><b>${RNQ[d - 1]}</b></td><td>${dia('C', d)}</td><td>${chordNotes(scaleOf('C')[d - 1], DIA_Q[d - 1]).join(' ')}</td><td><button class="mini" data-chords='${JSON.stringify(progList('C', [d]))}'>▶</button></td></tr>`).join('')}</table>
+        <p class="big">외울 건 순서 하나:<br>maj7 · m7 · m7 · maj7 · 7 · m7 · m7♭5</p><p class="note">어느 메이저 키든 이 순서는 똑같아요.</p>` },
+      { h: '로마숫자: 키가 바뀌어도 같은 이름', b: `<p><b>대문자</b>(Ⅰ Ⅳ Ⅴ) = 3음이 장3도인 코드, <b>소문자</b>(ⅱ ⅲ ⅵ ⅶ) = 3음이 단3도인 코드.</p>
+        <table class="tbl"><tr><th></th>${RN.map(r => `<th>${r}</th>`).join('')}</tr>${['C', 'G', 'F', 'B♭'].map(K => `<tr><td><b>${K}</b></td>${[1, 2, 3, 4, 5, 6, 7].map(d => `<td><small style="color:var(--text)">${dia(K, d).replace(/maj7|m7♭5|m7|7/, x => `<br>${x}`)}</small></td>`).join('')}</tr>`).join('')}</table>
+        <p>"ⅱ–Ⅴ–Ⅰ"이라고 하면 <b>모든 키에서</b> 통하는 말이 돼요.</p>` },
+      { h: '기능: 집 · 출발 · 긴장', b: `<p><b>토닉</b> (Ⅰ ⅲ ⅵ): 집, 안정<br><b>서브도미넌트</b> (ⅱ Ⅳ): 집을 떠나 출발<br><b>도미넌트</b> (Ⅴ ⅶ): 긴장, 집으로 돌아가고 싶음</p><p>대부분의 진행은 <b>토닉 → 서브도미넌트 → 도미넌트 → 토닉</b>으로 숨을 쉬어요.</p>`,
+        sounds: [{ label: 'Ⅰ – Ⅳ – Ⅴ – Ⅰ', chords: progList('C', [1, 4, 5, 1]) }, { label: 'Ⅰ – ⅱ – Ⅴ – Ⅰ', chords: progList('C', [1, 2, 5, 1]) }] },
+      { h: '7 코드는 키에 딱 하나', b: `<p>7개 중 <b>도미넌트7(그냥 "7")은 Ⅴ 하나뿐</b>이에요.</p><p>그래서 차트에서 7 코드를 찾으면 키가 보여요: <b>그 코드의 4도 위가 Ⅰ</b>.</p><p class="big">D7이 보이면 → G 키 후보<br>B♭7이 보이면 → E♭ 키 후보</p><p class="note">예외: 블루스(전부 7 코드)와 세컨더리 도미넌트 → 6단계.</p>` },
+      { h: '지판에서: ⅱ → Ⅴ → Ⅰ은 한 줄씩 위로', b: `<p>ⅱ → Ⅴ → Ⅰ은 루트가 <b>4도씩 위로</b> 두 번 이동해요. 베이스에선 <b>한 줄 위 같은 프렛</b>을 두 번.</p><p>C 키: D(A현 5) → G(D현 5) → C(G현 5).</p>`,
+        board: { to: 7, marks: [{ s: 1, f: 5, t: 'ⅱ', c: 'soft' }, { s: 2, f: 5, t: 'Ⅴ', c: 'ok' }, { s: 3, f: 5, t: 'Ⅰ', c: 'root' }] },
+        sounds: [{ label: 'Dm7 – G7 – Cmaj7', chords: progList('C', [2, 5, 1]) }] },
+      { h: '마이너 키의 다이아토닉', b: `<table class="tbl"><tr><th>번호</th><th>A 마이너</th></tr>${[1, 2, 3, 4, 5, 6, 7].map(d => `<tr><td><b>${MRN[d - 1]}</b></td><td>${minDia('A', d)}</td></tr>`).join('')}</table>
+        <p><b>Ⅴ7 주의</b>: 자연단음계대로면 Em7인데, 7음 G를 반음 올려 <b>G♯</b>로 만든 <b>E7</b>을 써요. 그래야 ⅰ로 끌려가는 긴장이 생기거든요 (하모닉 마이너).</p>`,
+        sounds: [{ label: 'Am7 – Dm7 – E7 – Am7', chords: progList('A', [1, 4, 5, 1], MIN_Q, MIN) }] },
+      { h: '솔로에서: 번호로 생각하기', b: `<p>차트를 로마숫자로 바꿔 읽으면, 한 키에서 연습한 프레이즈를 <b>다른 키로 그대로 옮길 수</b> 있어요. 베이스는 모양이 같으니 더 쉽고요.</p><p class="note">📱 폰 연습: 좋아하는 곡의 코드 차트를 찾아 로마숫자로 바꿔보기.<br>🎸 집 연습: ⅱ–Ⅴ–Ⅰ 루트를 C → F → B♭ → E♭ 키로 이동하며 치기.</p>` },
+    ],
+  },
+  {
+    id: 'l6', stage: 6, title: '코드 진행 읽기', quizzes: ['iivi', 'next', 'blues', 'earProg'],
+    cards: [
+      { h: '진행은 덩어리로 읽는다', b: `<p>코드를 하나씩 읽지 말고 <b>단어처럼 묶어서</b> 읽어요. 자주 나오는 덩어리 몇 개만 알면 대부분의 차트가 읽혀요.</p><p class="big">Ⅴ–Ⅰ · ⅱ–Ⅴ–Ⅰ · 마이너 ⅱ–Ⅴ–ⅰ<br>Ⅰ–ⅵ–ⅱ–Ⅴ · 세컨더리 도미넌트 · 블루스</p>` },
+      { h: 'Ⅴ7 → Ⅰ: 가장 강한 움직임', b: `<p>루트가 4도 위(=5도 아래)로. G7 → Cmaj7.</p><p>G7의 <b>3음 B는 반음 위 C로</b>, <b>♭7음 F는 반음 아래 E로</b> 풀려요. 이 반음 움직임이 "해결"되는 느낌의 정체예요. 솔로에서 이 두 음을 짚으면 진행이 들려요.</p>`,
+        sounds: [{ label: 'G7 → Cmaj7', chords: progList('C', [5, 1]) }, { label: 'B → C, F → E', seq: [47, 48, 41, 40] }] },
+      { h: 'ⅱ–Ⅴ–Ⅰ: 재즈의 기본 단위', b: `<p>Dm7 – G7 – Cmaj7. 차트에서 <b>"m7 다음에 4도 위 7 코드"</b>가 보이면 ⅱ–Ⅴ예요. 괄호로 묶어 읽어요.</p><p>곡 중간에 다른 키의 ⅱ–Ⅴ가 나오면 <b>잠깐 그 키로 간다</b>는 신호예요.</p>`,
+        board: { to: 7, marks: [{ s: 1, f: 5, t: 'D', c: 'soft' }, { s: 2, f: 5, t: 'G', c: 'ok' }, { s: 3, f: 5, t: 'C', c: 'root' }] },
+        sounds: [{ label: 'C 키', chords: progList('C', [2, 5, 1]) }, { label: 'F 키', chords: progList('F', [2, 5, 1]) }, { label: 'B♭ 키', chords: progList('B♭', [2, 5, 1]) }] },
+      { h: '마이너 ⅱ–Ⅴ–ⅰ', b: `<p>Bm7♭5 – E7 – Am7. <b>m7♭5 다음에 7 코드</b>가 오면 마이너로 해결한다는 신호.</p><p>메이저 ⅱ–Ⅴ보다 어둡고 극적이에요.</p>`,
+        sounds: [{ label: 'A 마이너', chords: progList('A', [2, 5, 1], MIN_Q, MIN) }, { label: 'D 마이너', chords: progList('D', [2, 5, 1], MIN_Q, MIN) }] },
+      { h: '5도권 순환 진행', b: `<p class="big">Cmaj7 → Fmaj7 → Bm7♭5 → E7 → Am7 → Dm7 → G7 → Cmaj7</p><p>루트가 <b>계속 4도 위로</b> 이동해요 (F → B만 증4도). 수많은 스탠더드의 뼈대예요.</p><p>베이스로는 한 줄씩 위로 올라가다 줄이 끝나면 옥타브 아래로 돌아와 다시.</p>`,
+        sounds: [{ label: '순환 진행 (C 키)', chords: progList('C', [1, 4, 7, 3, 6, 2, 5, 1], ['maj7', 'm7', 'dom', 'maj7', 'dom', 'm7', 'hd']), beat: 1.1 }] },
+      { h: 'Ⅰ–ⅵ–ⅱ–Ⅴ와 팝 진행', b: `<p><b>Ⅰ–ⅵ–ⅱ–Ⅴ</b>: 턴어라운드. 끝나지 않고 계속 도는 느낌이라 곡 끝이나 반복 구간에 많아요.</p><p><b>Ⅰ–Ⅴ–ⅵ–Ⅳ</b>: 팝에서 가장 흔한 진행.</p>`,
+        sounds: [{ label: 'Ⅰ–ⅵ–ⅱ–Ⅴ', chords: progList('C', [1, 6, 2, 5]) }, { label: 'Ⅰ–Ⅴ–ⅵ–Ⅳ', chords: progList('C', [1, 5, 6, 4]) }] },
+      { h: '세컨더리 도미넌트', b: `<p>키에 없는 7 코드가 나오면: <b>다음 코드의 Ⅴ7</b>인지 확인해요.</p><table class="tbl"><tr><th>C 키에서</th><th>향하는 곳</th><th>키 밖 음</th></tr><tr><td>A7</td><td>→ Dm7 (ⅱ)</td><td>C♯</td></tr><tr><td>E7</td><td>→ Am7 (ⅵ)</td><td>G♯</td></tr><tr><td>D7</td><td>→ G7 (Ⅴ)</td><td>F♯</td></tr></table><p>솔로에서 <b>그 코드에서만</b> 키 밖 음(A7의 C♯)을 짚으면 진행이 확 살아나요.</p>`,
+        sounds: [{ label: 'Cmaj7 – A7 – Dm7 – G7', chords: [[36, 'maj7'], [45, 'dom'], [38, 'm7'], [43, 'dom'], [36, 'maj7']] }] },
+      { h: '12마디 블루스', b: `<p>모든 코드가 <b>도미넌트7</b>인 예외적인 형식. F 블루스:</p>
+        <div class="grid12b">${BLUES.map(d => `<span class="${d === 4 ? 'iv' : d === 5 ? 'v' : ''}">${scaleOf('F')[d - 1]}7</span>`).join('')}</div>
+        <p>Ⅰ7 ×4 | Ⅳ7 ×2, Ⅰ7 ×2 | Ⅴ7 Ⅳ7 Ⅰ7 Ⅴ7. 잼 세션의 공용어라 꼭 외워둬요. 솔로 입구는 7단계 펜타토닉.</p>`,
+        sounds: [{ label: 'F 블루스 12마디', chords: progList('F', BLUES, Array(7).fill('dom')), beat: 0.9 }] },
+      { h: '차트 분석 루틴', b: `<ol class="songs"><li><b>키 찾기</b>: 7 코드의 4도 위, maj7 코드</li><li><b>ⅱ–Ⅴ 괄호 치기</b>: m7(또는 m7♭5) → 4도 위 7</li><li><b>키 밖 7 코드</b> → 세컨더리 도미넌트인지</li><li><b>키가 바뀌는 곳</b> 표시</li></ol>
+        <p>예시:</p><div class="chart"><span>Am7</span><span>Dm7</span><span>G7</span><span>Cmaj7</span><span>Fmaj7</span><span>Bm7♭5</span><span>E7</span><span>Am7</span></div>
+        <p>C 키(=A 마이너): ⅵ [ⅱ Ⅴ] Ⅰ Ⅳ [ⅱø Ⅴ7 → ⅰ]. 앞은 메이저 ⅱ–Ⅴ–Ⅰ, 뒤는 A 마이너 ⅱ–Ⅴ–ⅰ. 8개 코드가 <b>덩어리 2개</b>로 보여요.</p>` },
+    ],
+  },
 ];
 const ROADMAP = [
-  [5, '다이아토닉 코드 · 로마숫자'], [6, '코드 진행 읽기: 5도권 · ⅱ–Ⅴ–Ⅰ · 블루스'],
   [7, '펜타토닉 · 블루스 스케일 (첫 즉흥)'], [8, '코드톤 솔로 · 가이드톤'], [9, '접근음 · 크로매틱 연결'],
   [10, '코드-스케일 (도리안 · 믹솔리디안 · 하모닉 마이너)'], [11, '리듬 · 프레이징'], ['🎯', '곡 적용: 차트 보고 솔로'],
 ];
 const EAR_TRACK = [
   ['E1', '음정 듣기', true], ['E2', '코드 성질 듣기', true], ['E3', '스케일 디그리 듣기 (키 위에서 몇 음?)', false],
-  ['E4', '코드 진행 듣기', false], ['E5', '프레이즈 받아치기', false],
+  ['E4', '코드 진행 듣기', true], ['E5', '프레이즈 받아치기', false],
 ];
 
 /* ───────── 화면들 ───────── */
@@ -578,7 +809,11 @@ function home() {
 
 function wireSounds(root) {
   $$('[data-seq]', root).forEach(b => b.onclick = () => playSeq(b.dataset.seq.split(',').map(Number)));
+  $$('[data-chords]', root).forEach(b => b.onclick = () => playChords(JSON.parse(b.dataset.chords), +(b.dataset.beat || 1.25)));
 }
+const soundBtn = s => s.chords
+  ? `<button class="snd" data-chords='${JSON.stringify(s.chords)}' ${s.beat ? `data-beat="${s.beat}"` : ''}>▶ ${s.label}</button>`
+  : `<button class="snd" data-seq="${s.seq.join(',')}">▶ ${s.label}</button>`;
 
 function lesson(id) {
   const L = LESSONS.find(l => l.id === id); if (!L) return go('#/');
@@ -593,7 +828,7 @@ function lesson(id) {
       <h2>${c.h}</h2>
       <div class="body">${c.b}</div>
       ${c.board ? `<div class="boardwrap">${board(c.board)}</div>${c.cap ? `<p class="cap">${c.cap}</p>` : ''}` : ''}
-      ${c.sounds ? `<div class="sounds">${c.sounds.map(s => `<button class="snd" data-seq="${s.seq.join(',')}">▶ ${s.label}</button>`).join('')}</div>` : ''}
+      ${c.sounds ? `<div class="sounds">${c.sounds.map(soundBtn).join('')}</div>` : ''}
       ${last ? `<div class="after"><p>이제 퀴즈로 익혀요:</p>${L.quizzes.map(q => `<a class="row" href="#/quiz/${q}">${QUIZ[q].ear ? '🎧' : '✏️'} ${QUIZ[q].title}</a>`).join('')}</div>` : ''}
     </main>
     <nav class="pager"><button id="prev" ${i === 0 ? 'disabled' : ''}>← 이전</button><button id="nextc" class="primary">${last ? '홈으로' : '다음 →'}</button></nav>`;
@@ -639,7 +874,8 @@ function runQuiz(ids, title) {
     render();
   };
   const render = () => {
-    const many = q.choices && q.choices.length > 6;
+    const many = q.choices && q.choices.length > 7;
+    const wide = q.choices && q.choices.some(c => c.label.replace(/<[^>]+>/g, '').length > 11);
     app.innerHTML = `
     <header class="bar"><a href="#/" class="back">✕</a><div class="progress"><i style="width:${qn / N * 100}%"></i></div><span>${qn + 1}/${N}</span></header>
     <main class="quiz">
@@ -649,7 +885,7 @@ function runQuiz(ids, title) {
       ${q.listen && !S.settings.sound ? `<p class="warn">설정에서 소리를 켜주세요.</p>` : ''}
       <div class="boardwrap">${q.board ? board(q.board) : ''}</div>
       <div class="feedback"></div>
-      <div class="choices ${many ? 'grid12' : ''}">${(q.choices || []).map((c, i) => `<button class="choice" data-i="${i}">${c.label}</button>`).join('')}</div>
+      <div class="choices ${many ? 'grid12' : wide ? 'wide' : ''}">${(q.choices || []).map((c, i) => `<button class="choice" data-i="${i}">${c.label}</button>`).join('')}</div>
       <button class="next hidden primary">다음 →</button>
     </main>`;
     $$('.choice').forEach(b => b.onclick = () => answer(q.choices[+b.dataset.i].v, b));
