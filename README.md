@@ -26,5 +26,8 @@
 3. Files에 [claude-project/curriculum.md](claude-project/curriculum.md) 업로드
 4. 폰 Claude 앱 → 프로젝트에서 질문. 대화가 곧 학습 기록
 
+## 소리 출처
+베이스 샘플(`samples/bass/`): FluidR3_GM 일렉 베이스(핑거), Frank Wen, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/us/). [gleitz/midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts)에서 받음. 재생할 때 음높이와 길이를 조정합니다.
+
 ## 로컬 실행
 아무 정적 서버로 폴더를 열면 됩니다. 예: `npx serve .`

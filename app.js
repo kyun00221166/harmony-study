@@ -168,23 +168,34 @@ function loadSamples(c) {
 function nearestSample(m) {
   let best = null;
   for (const k in samples) if (best == null || Math.abs(k - m) < Math.abs(best - m)) best = +k;
-  return best != null && Math.abs(best - m) <= 2 ? best : null;
+  return best;
+}
+// 여러 음이 겹쳐도 찌그러지지 않게 리미터를 거쳐 출력
+let bus;
+function master(c) {
+  if (!bus) {
+    bus = c.createDynamicsCompressor();
+    bus.threshold.value = -10; bus.ratio.value = 12; bus.attack.value = 0.003; bus.release.value = 0.15;
+    bus.connect(c.destination);
+  }
+  return bus;
 }
 function pluck(midi, when = 0, dur = 1.0, vol = 0.45) {
   if (!S.settings.sound) return;
   const c = audio();
   const t = c.currentTime + when + 0.03;
+  const out = master(c);
   const m = midi + (S.settings.octUp ? 12 : 0);
   const sm = S.settings.real ? nearestSample(m) : null;
   if (sm != null) {
     const src = c.createBufferSource(); src.buffer = samples[sm];
     src.playbackRate.value = Math.pow(2, (m - sm) / 12);
     const g = c.createGain();
-    g.gain.setValueAtTime(vol * 2.2, t);
-    g.gain.setValueAtTime(vol * 2.2, t + Math.max(0.05, dur - 0.12));
+    g.gain.setValueAtTime(vol * 10, t);
+    g.gain.setValueAtTime(vol * 10, t + Math.max(0.05, dur - 0.12));
     g.gain.linearRampToValueAtTime(0.0001, t + dur);
-    src.connect(g); g.connect(c.destination);
-    src.start(t); src.stop(t + dur + 0.02);
+    src.connect(g); g.connect(out);
+    src.start(t, sm === 31 ? 0.03 : 0); src.stop(t + dur + 0.02);
     return;
   }
   const f = 440 * Math.pow(2, (m - 69) / 12);
@@ -199,7 +210,7 @@ function pluck(midi, when = 0, dur = 1.0, vol = 0.45) {
   g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
   g.gain.exponentialRampToValueAtTime(vol * 0.45, t + 0.25);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o1.connect(lp); o2.connect(sub); sub.connect(lp); lp.connect(g); g.connect(c.destination);
+  o1.connect(lp); o2.connect(sub); sub.connect(lp); lp.connect(g); g.connect(out);
   o1.start(t); o2.start(t); o1.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
 }
 const playSeq = (ms, gap = 0.65) => ms.forEach((m, i) => pluck(m, i * gap));
@@ -214,9 +225,11 @@ function playChord(ms) {
 const KEY = 'harmony-study-v1';
 const S = Object.assign({ items: {}, lessons: {}, streak: { last: null, count: 0 }, hideInstall: false },
   JSON.parse(localStorage.getItem(KEY) || '{}'));
-S.settings = Object.assign({ sound: true, octUp: true, real: true, tabView: false }, S.settings);
-// 지판 방향: 연주자 시점(E현이 위, 가는 줄이 "아래") / TAB 방향(G현이 위)
-const UP = S.settings.tabView ? '위' : '아래';
+S.settings = Object.assign({ sound: true, octUp: false, real: true, eTop: false }, S.settings);
+// 이전 버전 설정 정리: 실제 샘플은 원래 음높이가 기본, 지판은 E현이 맨 아래가 기본
+if (S.settings.v !== 2) { S.settings.octUp = false; S.settings.v = 2; delete S.settings.tabView; }
+// 지판 방향: 기본 E현이 맨 아래 (TAB과 같음) / 설정에서 E현이 맨 위
+const UP = S.settings.eTop ? '아래' : '위';
 const save = () => localStorage.setItem(KEY, JSON.stringify(S));
 const dstr = d => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 function touchStreak() {
@@ -251,7 +264,7 @@ function board(o = {}) {
   const to = o.to ?? 12, W = 680, H = 232, NUT = 76;
   const fw = (W - NUT - 10) / to;
   const X = f => f === 0 ? NUT - 26 : NUT + (f - 0.5) * fw;
-  const Y = s => 34 + (S.settings.tabView ? 3 - s : s) * 52;  // 기본: 연주자 시점 (E현이 위)
+  const Y = s => 34 + (S.settings.eTop ? s : 3 - s) * 52;  // 기본: E현이 맨 아래
   let g = `<rect x="${NUT}" y="12" width="${W - NUT - 10}" height="${3 * 52 + 44}" rx="4" class="fb-wood"/>`;
   const mid = (Y(1) + Y(2)) / 2;
   [3, 5, 7, 9].filter(f => f <= to).forEach(f => g += `<circle cx="${X(f)}" cy="${mid}" r="7" class="fb-inlay"/>`);
@@ -674,7 +687,7 @@ const LESSONS = [
       { h: '1프렛 = 반음, 2프렛 = 온음', b: `<p>베이스는 <b>한 프렛이 반음</b>. 반음 두 개가 <b>온음</b>이에요.</p><p>E현에서: E → F는 1프렛(반음), F → G는 2프렛(온음).</p>`,
         board: { str: 0, to: 5, marks: [{ s: 0, f: 0, t: 'E', c: 'ok' }, { s: 0, f: 1, t: 'F', c: 'ok' }, { s: 0, f: 3, t: 'G', c: 'ok' }, { s: 0, f: 5, t: 'A', c: 'ok' }] },
         sounds: [{ label: 'E → F (반음)', seq: [28, 29] }, { label: 'F → G (온음)', seq: [29, 31] }] },
-      { h: '개방현: E A D G', b: `<p>굵은 줄부터 <b>E – A – D – G</b>. 그림에선 연주할 때 내려다보는 것처럼 E현이 맨 아래예요.</p>`,
+      { h: '개방현: E A D G', b: `<p>굵은 줄부터 <b>E – A – D – G</b>. 그림에선 TAB처럼 <b>E현이 맨 ${S.settings.eTop ? '위' : '아래'}</b>예요.</p>`,
         board: { to: 5, marks: [0, 1, 2, 3].map(s => ({ s, f: 0, t: STR[s].n, c: 'root' })) },
         sounds: [{ label: '개방현 E A D G', seq: [28, 33, 38, 43] }] },
       { h: '5프렛 = 다음 줄 개방현', b: `<p>E현 5프렛 = <b>A</b> = A현 개방. 튜닝할 때 쓰는 그 원리예요.</p><p>모든 줄이 <b>완전4도(반음 5개)</b> 간격이라 그래요. 이건 2단계에서 다시 나옵니다.</p>`,
@@ -997,7 +1010,7 @@ function settings() {
       <label class="tog"><span>소리 켜기</span><input type="checkbox" id="snd" ${S.settings.sound ? 'checked' : ''}></label>
       <label class="tog"><span>한 옥타브 위로 재생<small>폰 스피커·작은 이어폰에서 더 잘 들려요</small></span><input type="checkbox" id="oct" ${S.settings.octUp ? 'checked' : ''}></label>
       <label class="tog"><span>실제 베이스 소리<small>${Object.keys(samples).length ? '녹음 샘플 사용 중' : '샘플을 못 불러오면 신스 소리로 대체'}</small></span><input type="checkbox" id="real" ${S.settings.real ? 'checked' : ''}></label>
-      <label class="tog"><span>지판을 TAB 방향으로<small>끄면 연주자 시점 (E현이 위, 가는 줄이 "아래")</small></span><input type="checkbox" id="tab" ${S.settings.tabView ? 'checked' : ''}></label>
+      <label class="tog"><span>지판에서 E현을 맨 위로<small>끄면 E현이 맨 아래 (TAB과 같은 방향)</small></span><input type="checkbox" id="tab" ${S.settings.eTop ? 'checked' : ''}></label>
       <button class="snd" id="test">▶ 소리 테스트 (E A D G)</button>
       <p class="note">iPhone은 무음 스위치가 켜져 있으면 소리가 안 날 수 있어요.</p>
       <hr>
@@ -1008,7 +1021,7 @@ function settings() {
     $('#snd').onchange = e => { S.settings.sound = e.target.checked; save(); };
     $('#oct').onchange = e => { S.settings.octUp = e.target.checked; save(); };
     $('#real').onchange = e => { S.settings.real = e.target.checked; save(); };
-    $('#tab').onchange = e => { S.settings.tabView = e.target.checked; save(); location.reload(); };
+    $('#tab').onchange = e => { S.settings.eTop = e.target.checked; save(); location.reload(); };
     $('#test').onclick = () => playSeq([28, 33, 38, 43]);
     $('#reset').onclick = () => { if (confirm('진도를 모두 지울까요?')) { S.items = {}; S.lessons = {}; S.streak = { last: null, count: 0 }; save(); draw(); } };
   };
@@ -1028,5 +1041,8 @@ function route() {
   else if (page === 'settings') settings();
   else home();
 }
+// 첫 소리부터 샘플이 나오도록 앱을 열 때 미리 불러오기 (재생은 첫 터치 이후)
+window.addEventListener('pointerdown', () => audio(), { once: true });
+audio();
 window.addEventListener('hashchange', route);
 route();
