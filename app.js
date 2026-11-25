@@ -1,5 +1,5 @@
 'use strict';
-/* 화성학 스터디 · 베이스 — app.js = 기능과 1~6단계 기본, theory.js = 보강 카드와 7·8단계 */
+/* 화성학 스터디 · 베이스 — app.js = 기능과 1~6단계 기본, theory.js = 보강 카드와 7·8단계, adapt.js = 난이도 조절과 기록 */
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -281,7 +281,8 @@ function startLoop({ bars, bpm, swing, root, onBar, onStop }) {
   st.timer = setInterval(tick, 80); tick();
 }
 // 화면을 끄거나 다른 앱으로 가면 정지 (백그라운드에서 박자가 깨지는 것 방지)
-document.addEventListener('visibilitychange', () => { if (document.hidden) stopAll(); });
+let quizAway = null;
+document.addEventListener('visibilitychange', () => { if (document.hidden) { stopAll(); if (quizAway) quizAway(); } });
 function pluck(midi, when = 0, dur = 1.0, vol = 0.45) {
   if (!S.settings.sound) return;
   const c = audio();
@@ -341,17 +342,32 @@ function touchStreak() {
   S.streak.count = S.streak.last === y ? S.streak.count + 1 : 1;
   S.streak.last = t; save();
 }
-// 라이트너 박스 (0~4): 맞히면 +1, 틀리면 0으로. 낮은 박스일수록 자주 출제
-function grade(key, ok) {
-  const r = S.items[key] || { b: 0, r: 0, w: 0 };
-  r.b = ok ? Math.min(4, r.b + 1) : 0;
-  ok ? r.r++ : r.w++;
-  S.items[key] = r; save();
+// 간격 반복: 박스 0~4. 틀리면 0으로, 빠르게 맞히면 +1, 느리게 맞히면 제자리.
+// 박스 2부터는 복습 날짜가 돼야 오른다 (하루에 몰아쳐서 다 채울 수 없음)
+const DAY = 864e5, GAP = [0, DAY, 3 * DAY, 7 * DAY, 14 * DAY];
+const isDue = (r, now = Date.now()) => !r || !r.d || now >= r.d;
+// 결과: 'fast' | 'slow' | 'wrong'. ms가 null이면(딴 일을 했거나 화면을 나갔다 옴) 속도는 따지지 않는다
+function grade(key, ok, ms, id) {
+  const now = Date.now(), r = S.items[key] || { b: 0, r: 0, w: 0 };
+  const res = !ok ? 'wrong' : ms != null && ms > limitOf(id) ? 'slow' : 'fast';
+  if (res === 'wrong') { r.b = 0; r.w++; r.d = now + 6e5; }
+  else {
+    r.r++;
+    if (res === 'slow') { r.b = Math.max(1, r.b); r.d = now + DAY; }
+    else if (r.b < 2 || isDue(r, now)) { r.b = Math.min(4, r.b + 1); r.d = now + GAP[r.b]; }
+  }
+  // 문제별 최근 실력(0~1). 약한 문제를 자주 내도 퀴즈 전체 정답률이 왜곡되지 않게 문제마다 따로 잰다
+  const mix = (old, v) => old == null ? v : old + 0.35 * (v - old);
+  r.p = +mix(r.p, ok ? 1 : 0).toFixed(3); r.f = +mix(r.f, res === 'fast' ? 1 : 0).toFixed(3);
+  r.t = now; S.items[key] = r;
+  logAnswer(id, key, res, ms, now);
+  save();
+  return res;
 }
-const WEIGHT = [6, 4, 2.5, 1.5, 0.8];
+const WEIGHT = [4, 3, 2, 1.3, 0.8];
 function pickWeighted(keys, avoid) {
   const pool = keys.length > 1 ? keys.filter(k => k !== avoid) : keys;
-  const w = pool.map(k => S.items[k] ? WEIGHT[S.items[k].b] : 3);
+  const w = pool.map(k => S.items[k] ? WEIGHT[S.items[k].b] * (isDue(S.items[k]) ? 1.5 : 0.3) : 3);
   let x = Math.random() * w.reduce((a, b) => a + b, 0);
   for (let i = 0; i < pool.length; i++) { x -= w[i]; if (x <= 0) return pool[i]; }
   return pool[pool.length - 1];
@@ -984,14 +1000,16 @@ function home() {
   <header class="top"><div><h1>화성학 스터디</h1><p class="sub">베이스로 배우는 화성학 · ABC 표기</p></div>
     <div class="streak">${S.streak.count ? `🔥 ${S.streak.count}일` : ''}</div></header>
   <main class="home">
-    <a class="cta" href="#/daily">${started ? '오늘의 5분 복습' : '시작하기 (5분)'}<span>틀렸던 것 위주로 10문제</span></a>
+    ${homeTop()}
     ${!isStandalone() && !S.hideInstall ? `<div class="tip"><b>앱처럼 쓰기:</b> iPhone은 공유 → "홈 화면에 추가", Android는 ⋮ → "홈 화면에 추가". 오프라인에서도 돼요.<button class="x" id="hideTip">✕</button></div>` : ''}
     ${LESSONS.map(L => `
-      <section class="stage"><h2><span class="num">${L.stage}</span>${L.title}</h2>
-        <a class="row lesson" href="#/lesson/${L.id}">📖 개념 카드 ${L.cards.length}장 ${S.lessons[L.id] === L.cards.length ? '<span class="done">✓ 읽음</span>' : S.pos?.[L.id] ? `<span class="new">${S.pos[L.id] + 1}번부터 이어 보기</span>` : S.lessons[L.id] ? '<span class="new">카드 추가됨</span>' : '<span class="new">먼저 읽기</span>'}</a>
-        ${L.quizzes.map(q => { const m = mastery(q); return `<a class="row" href="#/quiz/${q}"><span>${QUIZ[q].ear ? '🎧' : '✏️'} ${QUIZ[q].title}</span><span class="meter"><i style="width:${Math.round(m * 100)}%"></i></span><span class="pct">${Math.round(m * 100)}%</span></a>`; }).join('')}
-      </section>`).join('')}
+      <details class="stage" ${L.stage === curStage() ? 'open' : ''}><summary><span class="num">${L.stage}</span>${L.title}${stageBadge(L)}</summary>
+        <a class="row lesson" href="#/lesson/${L.id}">📖 개념 카드 ${L.cards.length}장 ${S.lessons[L.id] === L.cards.length ? '<span class="done">✓ 읽음</span>' : S.pos?.[L.id] ? `<span class="new">${+S.pos[L.id] + 1}번부터 이어 보기</span>` : S.lessons[L.id] ? '<span class="new">카드 추가됨</span>' : '<span class="new">먼저 읽기</span>'}</a>
+        ${L.quizzes.map(q => { const m = Math.round(mastery(q) * 100); return `<a class="row" href="#/quiz/${q}"><span>${QUIZ[q].ear ? '🎧' : '✏️'} ${QUIZ[q].title} ${chip(q)}</span><span class="meter"><i style="width:${m}%"></i></span><span class="pct">${m}%</span></a>`; }).join('')}
+      </details>`).join('')}
+    <p class="note">게이지는 며칠에 걸쳐 다시 맞혀야 다 차요. 느리게 맞힌 문제는 오르지 않아요.</p>
     <section class="stage"><h2>도구</h2>
+      <a class="row" href="#/me">📊 내 기록 · 복사 · 백업</a>
       <a class="row" href="#/ref">🎸 지판 전체 보기 · 음정 표</a>
       <a class="row" href="#/settings">⚙️ 설정</a></section>
     <section class="stage soon"><h2>다음 단계 (준비 중)</h2>
@@ -1085,26 +1103,20 @@ function swipe(onLeft, onRight) {
   };
 }
 
-function availableForDaily() {
-  const ids = Object.keys(QUIZ).filter(id => {
-    if (QUIZ[id].ear && !S.settings.sound) return false;
-    const L = LESSONS.find(l => l.quizzes.includes(id));
-    return S.lessons[L.id] || QUIZ[id].items().some(k => S.items[k]);
-  });
-  return ids.length ? ids : ['f2n5'];
-}
-
-function runQuiz(ids, title) {
+// o.pick: 다음 문제 고르기, o.N: 문제 수, o.finish: 끝났을 때 화면
+function runQuiz(ids, title, o = {}) {
   audio(); // 사용자 탭 직후에 오디오 켜기 (모바일 정책)
-  const N = 10;
-  let qn = 0, score = 0, prevKey = null, q, answered, timer;
+  const N = o.N || 10, hist = [];
+  let qn = 0, score = 0, prevKey = null, q, answered, timer, t0, away = false;
+  quizAway = () => { away = true; };
   const wrongs = [];
   const next = () => {
     clearTimeout(timer); stopAll();
     if (qn >= N) return result();
-    const id = pick(ids), Q = QUIZ[id];
-    const key = pickWeighted(Q.items(), prevKey); prevKey = key;
-    q = Q.make(key); q.key = key; q.qid = id; answered = false;
+    const sel = o.pick ? o.pick({ qn, hist, prevKey }) : { id: pick(ids) };
+    if (!sel) return result();
+    const id = sel.id, Q = QUIZ[id], key = sel.key || pickWeighted(Q.items(), prevKey); prevKey = key;
+    q = Q.make(key); q.key = key; q.qid = id; q.why = sel.why; answered = false;
     render();
   };
   const render = () => {
@@ -1113,7 +1125,7 @@ function runQuiz(ids, title) {
     app.innerHTML = `
     <header class="bar"><a href="#/" class="back">✕</a><div class="progress"><i style="width:${qn / N * 100}%"></i></div><span>${qn + 1}/${N}</span></header>
     <main class="quiz">
-      <p class="qtitle">${title || QUIZ[q.qid].title}</p>
+      <p class="qtitle">${title ? `${title} · ${q.why ? `<b class="why">${q.why}</b> · ` : ''}` : ''}${QUIZ[q.qid].title}</p>
       <h2 class="prompt">${q.prompt}</h2>
       ${q.listen ? `<button class="listen">🔊 다시 듣기</button>` : ''}
       ${q.listen && !S.settings.sound ? `<p class="warn">설정에서 소리를 켜주세요.</p>` : ''}
@@ -1127,13 +1139,15 @@ function runQuiz(ids, title) {
     const l = $('.listen'); if (l) l.onclick = () => { stopAll(); q.play(); };
     $('.next').onclick = () => { qn++; next(); };
     if (q.autoplay) later(q.play, 150);
+    t0 = performance.now(); away = false;
   };
   const answer = (v, btn) => {
     if (answered) return;
     if (q.tap && q.tapString != null && v.s !== q.tapString) return;
     answered = true;
     const ok = q.correct(v);
-    grade(q.key, ok);
+    const dt = performance.now() - t0, ms = away || dt > 40000 ? null : Math.round(dt);
+    const res = grade(q.key, ok, ms, q.qid); hist.push({ id: q.qid, key: q.key, res, ms });
     if (ok) score++; else wrongs.push(q);
     $$('.choice').forEach(b => {
       const c = q.choices[+b.dataset.i];
@@ -1143,7 +1157,7 @@ function runQuiz(ids, title) {
     let after = q.after;
     if (after && q.tap && !ok) after = { ...after, marks: [...after.marks, { s: v.s, f: v.f, t: '✕', c: 'bad' }] };
     $('.boardwrap').innerHTML = after ? board(after) : '';
-    $('.feedback').innerHTML = `<p class="${ok ? 'ok' : 'no'}"><b>${ok ? '정답!' : '아쉬워요'}</b> ${q.explain}</p>`;
+    $('.feedback').innerHTML = `<p class="${ok ? 'ok' : 'no'}"><b>${!ok ? '아쉬워요' : res === 'slow' ? '정답, 조금 느려요' : '정답!'}</b>${ms != null ? ` <small>${(ms / 1000).toFixed(1)}초</small>` : ''} ${q.explain}</p>`;
     stopAll();
     if (q.playAfter) q.playAfter(); else if (!q.listen) q.play(); else if (!ok) later(q.play, 300);
     const nb = $('.next'); nb.classList.remove('hidden');
@@ -1151,17 +1165,19 @@ function runQuiz(ids, title) {
     else navigator.vibrate?.(60);
   };
   const result = () => {
-    touchStreak(); stopAll();
+    touchStreak(); stopAll(); quizAway = null;
+    if (o.finish) return o.finish({ score, n: qn, hist, wrongs });
     const msg = score === N ? '완벽해요! 🎉' : score >= 7 ? '좋아요! 👍' : score >= 4 ? '익숙해지는 중' : '처음엔 다 이래요';
     app.innerHTML = `
     <main class="result">
       <p class="qtitle">${title || QUIZ[ids[0]].title}</p>
       <div class="score">${score}<span>/${N}</span></div>
       <p class="msg">${msg}</p>
+      ${speedLine(hist)}
       ${wrongs.length ? `<div class="wrongs"><h3>틀린 문제 (다음에 더 자주 나와요)</h3>${wrongs.map(w => `<p>• ${w.explain}</p>`).join('')}</div>` : ''}
       <nav class="pager"><a class="btn" href="#/">홈</a><button class="primary" id="again">한 번 더</button></nav>
     </main>`;
-    $('#again').onclick = () => runQuiz(ids, title);
+    $('#again').onclick = () => runQuiz(ids, title, o);
   };
   next();
 }
@@ -1212,7 +1228,7 @@ function settings() {
     $('#real').onchange = e => { S.settings.real = e.target.checked; save(); };
     $('#tab').onchange = e => { S.settings.eTop = e.target.checked; save(); location.reload(); };
     $('#test').onclick = () => playSeq([28, 33, 38, 43]);
-    $('#reset').onclick = () => { if (confirm('진도를 모두 지울까요?')) { S.items = {}; S.lessons = {}; S.pos = {}; S.streak = { last: null, count: 0 }; save(); draw(); } };
+    $('#reset').onclick = () => { if (confirm('진도를 모두 지울까요?')) { keepBackup(); S.items = {}; S.lessons = {}; S.pos = {}; S.qs = {}; S.log = []; S.start = 0; S.streak = { last: null, count: 0 }; save(); draw(); } };
   };
   draw();
 }
@@ -1220,13 +1236,15 @@ function settings() {
 /* ───────── 라우터 ───────── */
 function go(h) { location.hash = h; }
 function route() {
-  stopAll();
+  stopAll(); quizAway = null;
   app.ontouchstart = app.ontouchend = null;
   window.scrollTo(0, 0);
   const [, page, arg] = (location.hash || '#/').split('/');
   if (page === 'lesson') lesson(arg);
   else if (page === 'quiz' && QUIZ[arg]) runQuiz([arg]);
-  else if (page === 'daily') runQuiz(availableForDaily(), '오늘의 5분');
+  else if (page === 'daily') daily();
+  else if (page === 'diag') diagnose();
+  else if (page === 'me') me();
   else if (page === 'ref') reference();
   else if (page === 'settings') settings();
   else home();

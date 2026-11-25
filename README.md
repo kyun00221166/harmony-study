@@ -24,6 +24,12 @@
 
 전체 커리큘럼은 [claude-project/curriculum.md](claude-project/curriculum.md)에 있습니다.
 
+## 난이도 조절과 기록 (`adapt.js`)
+전부 폰 안에서 계산하고 어디로도 보내지 않습니다.
+- 시작 진단(6~18문제)으로 시작 단계를 정하고, 정답률과 속도로 계속 조정
+- 오늘의 5분: 약점, 지금 단계, 잊을 때쯤 복습(1·3·7·14일)을 섞고, 막히면 바탕 문제로, 잘하면 위로
+- 내 기록: 약한 개념, 자주 틀린 문제, Claude에 붙일 기록 복사, 백업·복원
+
 ## Claude 프로젝트 (폰에서 AI에게 질문하기)
 1. claude.ai → Projects → Create project
 2. Instructions 칸에 [claude-project/instructions.md](claude-project/instructions.md) 내용 붙여넣기
