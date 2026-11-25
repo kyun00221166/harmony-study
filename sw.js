@@ -1,6 +1,6 @@
 // 오프라인 캐시: 캐시 먼저 보여주고, 뒤에서 새 버전 받아두기
-const CACHE = 'hs-v5';
-const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'hs-v6';
+const ASSETS = ['./', './index.html', './style.css', './app.js', './theory.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 for (let m = 28; m <= 79; m += 3) ASSETS.push(`./samples/bass/${m}.mp3`);
 
 self.addEventListener('install', e => {

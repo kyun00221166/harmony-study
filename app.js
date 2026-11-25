@@ -1,5 +1,5 @@
 'use strict';
-/* 화성학 스터디 · 베이스 — 단일 파일 앱 (프레임워크 없음) */
+/* 화성학 스터디 · 베이스 — app.js = 기능과 1~6단계 기본, theory.js = 보강 카드와 7·8단계 */
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -64,6 +64,26 @@ function opts(ans, wrongs, n = 4) {
   return shuffle(out).map(v => ({ v, label: v }));
 }
 
+// 재생·설명용 코드 사전 (CH 4종 + 나머지). 퀴즈의 Object.keys(CH)에는 섞이지 않게 따로 둔다
+const CHX = {
+  ...CH,
+  maj: { sym: '', ko: '메이저', t: [[0, 0, '1'], [4, 2, '3'], [7, 4, '5']] },
+  min: { sym: 'm', ko: '마이너', t: [[0, 0, '1'], [3, 2, '♭3'], [7, 4, '5']] },
+  dim: { sym: 'dim', ko: '디미니쉬', t: [[0, 0, '1'], [3, 2, '♭3'], [6, 4, '♭5']] },
+  aug: { sym: 'aug', ko: '어그먼트', t: [[0, 0, '1'], [4, 2, '3'], [8, 4, '♯5']] },
+  six: { sym: '6', ko: '메이저6', t: [[0, 0, '1'], [4, 2, '3'], [7, 4, '5'], [9, 5, '6']] },
+  m6: { sym: 'm6', ko: '마이너6', t: [[0, 0, '1'], [3, 2, '♭3'], [7, 4, '5'], [9, 5, '6']] },
+  sus: { sym: 'sus4', ko: '서스4', t: [[0, 0, '1'], [5, 3, '4'], [7, 4, '5']] },
+  sus7: { sym: '7sus4', ko: '세븐서스4', t: [[0, 0, '1'], [5, 3, '4'], [7, 4, '5'], [10, 6, '♭7']] },
+  dim7: { sym: 'dim7', ko: '디미니쉬7', t: [[0, 0, '1'], [3, 2, '♭3'], [6, 4, '♭5'], [9, 5, '♭♭7']] },
+  mM7: { sym: 'm(maj7)', ko: '마이너메이저7', t: [[0, 0, '1'], [3, 2, '♭3'], [7, 4, '5'], [11, 6, '7']] },
+};
+const cname = (r, q) => r + CHX[q].sym;
+// 어떤 루트 기준으로든 반음 → 이름·디그리
+const DEG = ['1', '♭2', '2', '♭3', '3', '4', '♭5', '5', '♭6', '6', '♭7', '7'], DEGSTEP = [0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6];
+const degOf = (pc, root) => (pc - parsePc(root) + 12) % 12;
+const nameOver = (pc, root) => { const n = degOf(pc, root); return spell(root, n, DEGSTEP[n]); };
+
 // 다이아토닉 코드 (메이저 키 / 마이너 키)
 const DIA_Q = ['maj7', 'm7', 'm7', 'maj7', 'dom', 'm7', 'hd'];
 const RN = ['Ⅰ', 'ⅱ', 'ⅲ', 'Ⅳ', 'Ⅴ', 'ⅵ', 'ⅶ'];
@@ -88,7 +108,7 @@ function playChords(list, beat = 1.25) { // list: [[루트 midi, 코드종류], 
   list.forEach(([r, q], i) => {
     const t = i * beat;
     pluck(r > 45 ? r - 12 : r, t, beat, 0.5);
-    CH[q].t.slice(1).forEach(([n]) => pluck(r + 12 + n, t + 0.02, beat * 0.95, 0.16));
+    comp(r % 12, q, t, beat * 0.95);
   });
 }
 // 키 + 로마숫자 디그리 → [[루트 midi, 코드종류], ...]
@@ -171,15 +191,97 @@ function nearestSample(m) {
   return best;
 }
 // 여러 음이 겹쳐도 찌그러지지 않게 리미터를 거쳐 출력
-let bus;
+let bus, busGain;
 function master(c) {
   if (!bus) {
     bus = c.createDynamicsCompressor();
     bus.threshold.value = -10; bus.ratio.value = 12; bus.attack.value = 0.003; bus.release.value = 0.15;
-    bus.connect(c.destination);
+    busGain = c.createGain(); bus.connect(busGain); busGain.connect(c.destination);
   }
   return bus;
 }
+// 지금 울리는 소리 전부 정지 (짧게 줄여서 딱 소리 방지). 다음 소리는 새 버스로 나간다
+const timers = new Set();
+const later = (fn, ms) => { const id = setTimeout(() => { timers.delete(id); fn(); }, ms); timers.add(id); };
+function stopAll() {
+  timers.forEach(clearTimeout); timers.clear();
+  stopLoop();
+  if (!bus) return;
+  const g = busGain, b = bus; bus = busGain = null;
+  g.gain.setTargetAtTime(0, actx.currentTime, 0.015);
+  setTimeout(() => { b.disconnect(); g.disconnect(); }, 150);
+}
+// 건반 (코드 반주용): 베이스와 구별되는 부드러운 음색
+function keys(midi, when = 0, dur = 1, vol = 0.1) {
+  if (!S.settings.sound) return;
+  const c = audio(), t = c.currentTime + when + 0.03, out = master(c);
+  const f = 440 * Math.pow(2, (midi - 69) / 12), g = c.createGain(), end = t + Math.max(0.15, dur);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(vol, t + 0.015);
+  g.gain.exponentialRampToValueAtTime(vol * 0.4, t + 0.015 + (end - t) * 0.5);
+  g.gain.exponentialRampToValueAtTime(0.0001, end);
+  [['triangle', 1, 1], ['sine', 2, 0.3], ['sine', 3, 0.08]].forEach(([type, mul, v]) => {
+    const o = c.createOscillator(), og = c.createGain(); o.type = type; o.frequency.value = f * mul; og.gain.value = v;
+    o.connect(og); og.connect(g); o.start(t); o.stop(end + 0.05);
+  });
+  g.connect(out);
+}
+// 코드 반주: 코드톤을 가운데 음역(55~66)에 모아서 연주
+function comp(rootPc, q, when, dur, vol = 0.1) {
+  CHX[q].t.forEach(([n]) => keys(55 + ((rootPc + n - 55) % 12 + 12) % 12, when, dur, vol));
+}
+let noiseBuf;
+function drum(kind, when) {
+  if (!S.settings.sound) return;
+  const c = audio(), t = c.currentTime + when + 0.03, out = master(c), g = c.createGain(); g.connect(out);
+  if (kind === 'k') {
+    const o = c.createOscillator(); o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+    g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18); o.connect(g); o.start(t); o.stop(t + 0.2); return;
+  }
+  if (!noiseBuf) { noiseBuf = c.createBuffer(1, c.sampleRate * 0.3, c.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+  const n = c.createBufferSource(); n.buffer = noiseBuf; const hp = c.createBiquadFilter();
+  hp.type = kind === 's' ? 'bandpass' : 'highpass'; hp.frequency.value = kind === 's' ? 1800 : 7000;
+  const len = kind === 's' ? 0.14 : kind === 'r' ? 0.16 : 0.05;
+  g.gain.setValueAtTime(kind === 's' ? 0.25 : kind === 'r' ? 0.07 : 0.12, t); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  n.connect(hp); hp.connect(g); n.start(t); n.stop(t + len + 0.02);
+}
+// 반주 루프. bars: [[[루트, 코드종류], ...], ...] 한 마디 4박, 한 마디에 코드 1·2·4개
+let loop = null, wake = null;
+function stopLoop() {
+  if (!loop) return;
+  clearInterval(loop.timer); const cb = loop.onStop; loop = null;
+  if (wake) { wake.release().catch(() => {}); wake = null; }
+  if (cb) cb();
+}
+function startLoop({ bars, bpm, swing, root, onBar, onStop }) {
+  stopAll();
+  const c = audio();
+  const st = loop = { bpm, root, beat: -4, next: c.currentTime + 0.15, onStop };
+  // 연주하는 동안 화면이 꺼지지 않게 (지원하는 폰만)
+  navigator.wakeLock?.request('screen').then(w => { if (loop === st) wake = w; else w.release(); }).catch(() => {});
+  const tick = () => {
+    if (loop !== st) return;
+    while (st.next < c.currentTime + 0.3) {
+      const w = st.next - c.currentTime - 0.03, spb = 60 / st.bpm, off = spb * (swing ? 2 / 3 : 1 / 2);
+      if (st.beat < 0) drum('h', w); // 한 마디 예비박
+      else {
+        const bi = Math.floor(st.beat / 4) % bars.length, b4 = st.beat % 4, bar = bars[bi], per = 4 / bar.length;
+        if (swing) { drum('r', w); if (b4 % 2) { drum('r', w + off); drum('h', w); } }
+        else { drum('h', w); drum('h', w + off); drum(b4 % 2 ? 's' : 'k', w); }
+        if (b4 % per === 0) {
+          const [r, q] = bar[b4 / per];
+          comp(parsePc(r), q, w, spb * per * 0.9, 0.085);
+          if (st.root) pluck(28 + (parsePc(r) - 4 + 12) % 12, w, spb * per * 0.95, 0.4);
+        }
+        if (b4 === 0 && onBar) later(() => { if (loop === st) onBar(bi); }, Math.max(0, w * 1000));
+      }
+      st.beat++; st.next += spb;
+    }
+  };
+  st.timer = setInterval(tick, 80); tick();
+}
+// 화면을 끄거나 다른 앱으로 가면 정지 (백그라운드에서 박자가 깨지는 것 방지)
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopAll(); });
 function pluck(midi, when = 0, dur = 1.0, vol = 0.45) {
   if (!S.settings.sound) return;
   const c = audio();
@@ -218,7 +320,7 @@ const playSeq = (ms, gap = 0.65) => ms.forEach((m, i) => pluck(m, i * gap));
 function playChord(ms) {
   ms.forEach((m, i) => pluck(m, i * 0.38, 0.9));
   const t = ms.length * 0.38 + 0.35;
-  ms.forEach(m => pluck(m, t, 1.8, 0.2));
+  ms.forEach(m => keys(m + 12, t, 2, 0.12));
 }
 
 /* ───────── 저장 (폰 안에만) ───────── */
@@ -286,6 +388,51 @@ function board(o = {}) {
     g += `<rect x="${x}" y="${Y(s) - 26}" width="${w}" height="52" class="fb-hit" data-s="${s}" data-f="${f}"/>`;
   }
   return `<svg class="fb" viewBox="0 0 ${W} ${H}" role="img" aria-label="베이스 지판">${g}</svg>`;
+}
+
+/* ───────── TAB ─────────
+   tab = { t: 제목, bpm, swing, key: 디그리 기준음(없으면 마디 코드), bars: [{ c: [루트, 코드], n: [[줄, 프렛, 8분음표 개수], ...] }] }
+   줄 -1은 쉼표. 음 이름과 디그리는 자동 계산한다. */
+function tabSvg(tab) {
+  const min = Math.min(8, ...tab.bars.flatMap(b => b.n.map(x => x[2])));
+  const slot = min >= 8 ? 8 : min >= 4 ? 4 : min >= 2 ? 2 : 1, perRow = Math.min(4, slot);
+  const W = 680, L = 44, H = 196, cw = (W - L - 6) / (8 / slot * perRow);
+  let out = '';
+  for (let r = 0; r < tab.bars.length; r += perRow) {
+    const row = tab.bars.slice(r, r + perRow), end = L + cw * (8 / slot) * row.length;
+    let g = '';
+    [3, 2, 1, 0].forEach((s, i) => {
+      const y = 46 + i * 26;
+      g += `<line x1="${L}" y1="${y}" x2="${end}" y2="${y}" class="tb-l"/><text x="10" y="${y + 6}" class="tb-s">${STR[s].n}</text>`;
+    });
+    row.forEach((b, bi) => {
+      const x0 = L + bi * cw * 8 / slot; let pos = 0;
+      g += `<line x1="${x0}" y1="46" x2="${x0}" y2="124" class="tb-b"/><text x="${x0 + 4}" y="26" class="tb-c">${cname(...b.c)}</text>`;
+      b.n.forEach(([s, f, d]) => {
+        const x = x0 + (pos / slot + 0.5) * cw; pos += d;
+        if (s < 0) { g += `<text x="${x}" y="91" class="tb-n">쉼</text>`; return; }
+        const y = 46 + (3 - s) * 26, pc = pcAt(s, f), ref = tab.key || b.c[0], n = degOf(pc, ref);
+        g += `<rect x="${x - 15}" y="${y - 12}" width="30" height="24" class="tb-bg"/><text x="${x}" y="${y + 8}" class="tb-f">${f}</text>`;
+        g += `<text x="${x}" y="154" class="tb-n">${nameOver(pc, ref)}</text><text x="${x}" y="184" class="tb-d ${n === 0 ? 'one' : ''}">${DEG[n]}</text>`;
+      });
+    });
+    g += `<line x1="${end}" y1="46" x2="${end}" y2="124" class="tb-b"/>`;
+    out += `<svg class="tabsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="베이스 TAB">${g}</svg>`;
+  }
+  return out;
+}
+function playTab(tab, rate = 1) {
+  stopAll();
+  const e = 60 / (tab.bpm * rate) / 2; // 8분음표 길이(초)
+  const sw = x => tab.swing && x % 2 === 1 ? x + 1 / 3 : x; // 스윙: 뒤 8분음표를 늦게
+  tab.bars.forEach((b, i) => {
+    const at = i * 8; let p = 0;
+    comp(parsePc(b.c[0]), b.c[1], at * e, e * 8 * 0.95, 0.07);
+    b.n.forEach(([s, f, d]) => {
+      if (s >= 0) pluck(midiAt(s, f), (at + sw(p)) * e, (sw(p + d) - sw(p)) * e * 0.96, 0.5);
+      p += d;
+    });
+  });
 }
 
 /* ───────── 퀴즈 정의 ───────── */
@@ -585,7 +732,7 @@ const QUIZ = {
       let K, given, ans, wrong, why, play;
       if (t === 'miiV') {
         K = pick(MIN_KEYS); given = [minDia(K, 2), minDia(K, 5)]; ans = minDia(K, 1);
-        wrong = [K + 'maj7', K + '7', minDia(K, 4), minDia(K, 6)];
+        wrong = [K + '7', minDia(K, 4), minDia(K, 2), minDia(K, 7)].filter(c => !given.includes(c));
         why = `마이너 ⅱ–Ⅴ는 ⅰm7으로 해결.`;
         play = () => playProg(K, [2, 5, 1], MIN_Q, MIN);
       } else {
@@ -596,13 +743,15 @@ const QUIZ = {
         if (t === 'sec') {
           const sec = spell(sc[1], 7, 4) + '7'; given = [dia(K, 1), sec]; ans = dia(K, 2);
           why = `${sec}는 ${K} 키에 없는 코드(3음 ${spell(sc[1], 11, 6)}가 키 밖). ${sc[1]}m7의 Ⅴ7 역할 = <b>세컨더리 도미넌트</b>. 그래서 4도 위 ${ans}로 가요.`;
-          play = () => { playProg(K, [1, 6], ['maj7', 'm7', 'm7', 'maj7', 'dom', 'dom', 'hd']); setTimeout(() => playProg(K, [2]), 2500); };
+          play = () => playChords([...progList(K, [1]), ...progList(K, [6], Array(7).fill('dom')), ...progList(K, [2])]);
         }
         if (t === 'cyc') { given = [dia(K, 1), dia(K, 4), dia(K, 7), sc[2] + '7']; ans = dia(K, 6); why = `다이아토닉 5도권 순환: 루트가 계속 4도 위로. ${sc[2]}7은 ${sc[5]}m7로 가는 세컨더리 도미넌트.`; play = () => playProg(K, [1, 4, 7, 3, 6], ['maj7', 'm7', 'dom', 'maj7', 'dom', 'm7', 'hd']); }
-        wrong = [1, 2, 3, 4, 5, 6, 7].map(x => dia(K, x)).concat([sc[0] + 'm7', sc[5] + 'maj7', sc[1] + '7']);
+        // 정답과 기능이 같아 실제로도 올 수 있는 코드는 오답에서 뺀다
+        wrong = [1, 2, 3, 4, 5, 6, 7].filter(x => !(['iiV', 'V'].includes(t) && FUNC[x - 1] === '토닉')).map(x => dia(K, x)).filter(c => !given.includes(c));
+        if (t === 'iiV' || t === 'V') wrong.push(sc[3] + 'm7', sc[4] + 'm7');
       }
       return {
-        prompt: `다음에 올 가능성이 가장 높은 코드는?<div class="chart">${given.map(c => `<span>${c}</span>`).join('')}<span class="q">?</span></div>`, board: null, after: null,
+        prompt: `<b>${K} ${t === 'miiV' ? '마이너' : '메이저'}</b> 키. 다음에 올 가능성이 가장 높은 코드는?<div class="chart">${given.map(c => `<span>${c}</span>`).join('')}<span class="q">?</span></div>`, board: null, after: null,
         choices: opts(ans, wrong), correct: v => v === ans,
         explain: `<b>${ans}</b>. ${why}`, play,
       };
@@ -771,7 +920,7 @@ const LESSONS = [
   {
     id: 'l5', stage: 5, title: '다이아토닉 코드 · 로마숫자', quizzes: ['dia', 'rn', 'func', 'findKey'],
     cards: [
-      { h: '다이아토닉 코드 = 키 안의 코드 7개', b: `<p>스케일 각 음 위에 <b>그 스케일 음만으로</b> 3도씩 쌓으면 코드가 7개 생겨요. 이게 그 키의 <b>가족</b>이에요.</p><p>대부분의 곡은 이 7개 위주로 굴러가요. 그래서 이걸 알면 차트의 70%는 "아는 코드"가 돼요.</p>` },
+      { h: '다이아토닉 코드 = 키 안의 코드 7개', b: `<p>스케일 각 음 위에 <b>그 스케일 음만으로</b> 3도씩 쌓으면 코드가 7개 생겨요. 이게 그 키의 <b>가족</b>이에요.</p><p>많은 곡이 이 7개를 중심으로 굴러가요. 그래서 키를 알면 차트의 코드 대부분이 "아는 코드"가 되고, 나머지 몇 개만 따로 살피면 돼요.</p>` },
       { h: 'C 메이저 키의 7개 코드', b: `<table class="tbl"><tr><th>번호</th><th>코드</th><th>구성</th><th></th></tr>
         ${[1, 2, 3, 4, 5, 6, 7].map(d => `<tr><td><b>${RNQ[d - 1]}</b></td><td>${dia('C', d)}</td><td>${chordNotes(scaleOf('C')[d - 1], DIA_Q[d - 1]).join(' ')}</td><td><button class="mini" data-chords='${JSON.stringify(progList('C', [d]))}'>▶</button></td></tr>`).join('')}</table>
         <p class="big">외울 건 순서 하나:<br>maj7 · m7 · m7 · maj7 · 7 · m7 · m7♭5</p><p class="note">어느 메이저 키든 이 순서는 똑같아요.</p>` },
@@ -780,7 +929,7 @@ const LESSONS = [
         <p>"ⅱ–Ⅴ–Ⅰ"이라고 하면 <b>모든 키에서</b> 통하는 말이 돼요.</p>` },
       { h: '기능: 집 · 출발 · 긴장', b: `<p><b>토닉</b> (Ⅰ ⅲ ⅵ): 집, 안정<br><b>서브도미넌트</b> (ⅱ Ⅳ): 집을 떠나 출발<br><b>도미넌트</b> (Ⅴ ⅶ): 긴장, 집으로 돌아가고 싶음</p><p>대부분의 진행은 <b>토닉 → 서브도미넌트 → 도미넌트 → 토닉</b>으로 숨을 쉬어요.</p>`,
         sounds: [{ label: 'Ⅰ – Ⅳ – Ⅴ – Ⅰ', chords: progList('C', [1, 4, 5, 1]) }, { label: 'Ⅰ – ⅱ – Ⅴ – Ⅰ', chords: progList('C', [1, 2, 5, 1]) }] },
-      { h: '7 코드는 키에 딱 하나', b: `<p>7개 중 <b>도미넌트7(그냥 "7")은 Ⅴ 하나뿐</b>이에요.</p><p>그래서 차트에서 7 코드를 찾으면 키가 보여요: <b>그 코드의 4도 위가 Ⅰ</b>.</p><p class="big">D7이 보이면 → G 키 후보<br>B♭7이 보이면 → E♭ 키 후보</p><p class="note">예외: 블루스(전부 7 코드)와 세컨더리 도미넌트 → 6단계.</p>` },
+      { h: '메이저 키에 7 코드는 딱 하나', b: `<p>메이저 키의 7개 코드 중 <b>도미넌트7(그냥 "7")은 Ⅴ 하나뿐</b>이에요.</p><p>그래서 차트에서 7 코드를 찾으면 키가 보여요: <b>그 코드의 4도 위가 Ⅰ</b>.</p><p class="big">D7이 보이면 → G 키 후보<br>B♭7이 보이면 → E♭ 키 후보</p><p class="note">예외: 마이너 키는 Ⅴ7과 ♭Ⅶ7 두 개예요. 블루스(전부 7 코드)와 세컨더리 도미넌트는 6단계에서.</p>` },
       { h: `지판에서: ⅱ → Ⅴ → Ⅰ은 한 줄씩 ${UP}로`, b: `<p>ⅱ → Ⅴ → Ⅰ은 루트가 <b>4도씩 위로</b> 두 번 이동해요. 베이스에선 <b>한 줄 ${UP} 같은 프렛</b>을 두 번.</p><p>C 키: D(A현 5) → G(D현 5) → C(G현 5).</p>`,
         board: { to: 7, marks: [{ s: 1, f: 5, t: 'ⅱ', c: 'soft' }, { s: 2, f: 5, t: 'Ⅴ', c: 'ok' }, { s: 3, f: 5, t: 'Ⅰ', c: 'root' }] },
         sounds: [{ label: 'Dm7 – G7 – Cmaj7', chords: progList('C', [2, 5, 1]) }] },
@@ -818,11 +967,11 @@ const LESSONS = [
   },
 ];
 const ROADMAP = [
-  [7, '펜타토닉 · 블루스 스케일 (첫 즉흥)'], [8, '코드톤 솔로 · 가이드톤'], [9, '접근음 · 크로매틱 연결'],
+  [9, '접근음 · 크로매틱 연결'],
   [10, '코드-스케일 (도리안 · 믹솔리디안 · 하모닉 마이너)'], [11, '리듬 · 프레이징'], ['🎯', '곡 적용: 차트 보고 솔로'],
 ];
 const EAR_TRACK = [
-  ['E1', '음정 듣기', true], ['E2', '코드 성질 듣기', true], ['E3', '스케일 디그리 듣기 (키 위에서 몇 음?)', false],
+  ['E1', '음정 듣기', true], ['E2', '코드 성질 듣기', true], ['E3', '스케일 디그리 듣기 (키 위에서 몇 음?)', true],
   ['E4', '코드 진행 듣기', true], ['E5', '프레이즈 받아치기', false],
 ];
 
@@ -839,7 +988,7 @@ function home() {
     ${!isStandalone() && !S.hideInstall ? `<div class="tip"><b>앱처럼 쓰기:</b> iPhone은 공유 → "홈 화면에 추가", Android는 ⋮ → "홈 화면에 추가". 오프라인에서도 돼요.<button class="x" id="hideTip">✕</button></div>` : ''}
     ${LESSONS.map(L => `
       <section class="stage"><h2><span class="num">${L.stage}</span>${L.title}</h2>
-        <a class="row lesson" href="#/lesson/${L.id}">📖 개념 카드 ${L.cards.length}장 ${S.lessons[L.id] ? '<span class="done">✓ 읽음</span>' : '<span class="new">먼저 읽기</span>'}</a>
+        <a class="row lesson" href="#/lesson/${L.id}">📖 개념 카드 ${L.cards.length}장 ${S.lessons[L.id] === L.cards.length ? '<span class="done">✓ 읽음</span>' : S.pos?.[L.id] ? `<span class="new">${S.pos[L.id] + 1}번부터 이어 보기</span>` : S.lessons[L.id] ? '<span class="new">카드 추가됨</span>' : '<span class="new">먼저 읽기</span>'}</a>
         ${L.quizzes.map(q => { const m = mastery(q); return `<a class="row" href="#/quiz/${q}"><span>${QUIZ[q].ear ? '🎧' : '✏️'} ${QUIZ[q].title}</span><span class="meter"><i style="width:${Math.round(m * 100)}%"></i></span><span class="pct">${Math.round(m * 100)}%</span></a>`; }).join('')}
       </section>`).join('')}
     <section class="stage"><h2>도구</h2>
@@ -853,9 +1002,29 @@ function home() {
   const t = $('#hideTip'); if (t) t.onclick = () => { S.hideInstall = true; save(); home(); };
 }
 
+function loopHtml(l) {
+  return `<div class="loop"><p class="tabt">🥁 ${l.t}</p>
+    <div class="loopgrid">${l.bars.map((b, i) => `<span data-bar="${i}">${b.map(c => cname(...c)).join('<i></i>')}</span>`).join('')}</div>
+    <div class="loopctl"><button id="lpPlay" class="primary">▶ 반주</button><button id="lpDn">−</button><b id="lpBpm">${l.bpm}</b><button id="lpUp">+</button></div>
+    <label class="tog"><span>베이스 루트도 같이<small>켜면 귀로 듣는 용, 끄면 직접 치는 용</small></span><input type="checkbox" id="lpRoot"></label></div>`;
+}
+function wireLoop(l) {
+  let bpm = l.bpm;
+  const setBpm = v => { bpm = Math.max(40, Math.min(200, v)); $('#lpBpm').textContent = bpm; if (loop) loop.bpm = bpm; };
+  $('#lpDn').onclick = () => setBpm(bpm - 5); $('#lpUp').onclick = () => setBpm(bpm + 5);
+  $('#lpRoot').onchange = e => { if (loop) loop.root = e.target.checked; };
+  $('#lpPlay').onclick = () => {
+    if (loop) return stopAll();
+    startLoop({ bars: l.bars, bpm, swing: l.swing, root: $('#lpRoot').checked,
+      onBar: i => $$('[data-bar]').forEach(x => x.classList.toggle('on', +x.dataset.bar === i)),
+      onStop: () => { const p = $('#lpPlay'); if (p) p.textContent = '▶ 반주'; $$('[data-bar].on').forEach(x => x.classList.remove('on')); } });
+    $('#lpPlay').textContent = '■ 정지';
+  };
+}
+
 function wireSounds(root) {
-  $$('[data-seq]', root).forEach(b => b.onclick = () => playSeq(b.dataset.seq.split(',').map(Number)));
-  $$('[data-chords]', root).forEach(b => b.onclick = () => playChords(JSON.parse(b.dataset.chords), +(b.dataset.beat || 1.25)));
+  $$('[data-seq]', root).forEach(b => b.onclick = () => { stopAll(); playSeq(b.dataset.seq.split(',').map(Number)); });
+  $$('[data-chords]', root).forEach(b => b.onclick = () => { stopAll(); playChords(JSON.parse(b.dataset.chords), +(b.dataset.beat || 1.25)); });
 }
 const soundBtn = s => s.chords
   ? `<button class="snd" data-chords='${JSON.stringify(s.chords)}' ${s.beat ? `data-beat="${s.beat}"` : ''}>▶ ${s.label}</button>`
@@ -863,27 +1032,46 @@ const soundBtn = s => s.chords
 
 function lesson(id) {
   const L = LESSONS.find(l => l.id === id); if (!L) return go('#/');
-  let i = 0;
+  S.pos = S.pos || {};
+  let i = Math.min(S.pos[id] || 0, L.cards.length - 1), list = false;
   const draw = () => {
+    stopAll(); window.scrollTo(0, 0);
     const c = L.cards[i], last = i === L.cards.length - 1;
-    if (last) { S.lessons[id] = true; save(); }
+    S.pos[id] = last ? 0 : i;
+    if (last) S.lessons[id] = L.cards.length;
+    save();
+    if (list) {
+      app.innerHTML = `<header class="bar"><button class="back" id="closeList">✕</button><b>${L.title}</b><span></span></header>
+      <main class="card">${L.cards.map((x, n) => `<button class="row listrow ${n === i ? 'cur' : ''}" data-n="${n}"><span>${n + 1}. ${x.h}</span>${x.add ? '<span class="new">보강</span>' : ''}</button>`).join('')}</main>`;
+      $('#closeList').onclick = () => { list = false; draw(); };
+      $$('.listrow').forEach(b => b.onclick = () => { i = +b.dataset.n; list = false; draw(); });
+      return;
+    }
     app.innerHTML = `
-    <header class="bar"><a href="#/" class="back">✕</a><div class="progress"><i style="width:${(i + 1) / L.cards.length * 100}%"></i></div><span>${i + 1}/${L.cards.length}</span></header>
+    <header class="bar"><a href="#/" class="back">✕</a><div class="progress"><i style="width:${(i + 1) / L.cards.length * 100}%"></i></div><button class="count" id="list">${i + 1}/${L.cards.length} ☰</button></header>
     <main class="card">
-      <p class="qtitle">${L.stage}단계 · ${L.title}</p>
+      <p class="qtitle">${L.stage}단계 · ${L.title}${c.add ? ' <span class="new">보강</span>' : ''}</p>
       <h2>${c.h}</h2>
       <div class="body">${c.b}</div>
       ${c.board ? `<div class="boardwrap">${board(c.board)}</div>${c.cap ? `<p class="cap">${c.cap}</p>` : ''}` : ''}
+      ${(c.boards || []).map(b => `<div class="boardwrap">${board(b)}</div><p class="cap">${b.cap || ''}</p>`).join('')}
+      ${(c.tabs || []).map((t, n) => `<div class="tab"><p class="tabt">${t.t}</p>${tabSvg(t)}<div class="tabbtn"><button data-tab="${n}" data-rate="1">▶ 듣기</button><button data-tab="${n}" data-rate="0.6">🐢 느리게</button><button data-stop>■</button></div></div>`).join('')}
+      ${c.loop ? loopHtml(c.loop) : ''}
       ${c.sounds ? `<div class="sounds">${c.sounds.map(soundBtn).join('')}</div>` : ''}
+      ${c.b2 ? `<div class="body">${c.b2}</div>` : ''}
       ${last ? `<div class="after"><p>이제 퀴즈로 익혀요:</p>${L.quizzes.map(q => `<a class="row" href="#/quiz/${q}">${QUIZ[q].ear ? '🎧' : '✏️'} ${QUIZ[q].title}</a>`).join('')}</div>` : ''}
     </main>
     <nav class="pager"><button id="prev" ${i === 0 ? 'disabled' : ''}>← 이전</button><button id="nextc" class="primary">${last ? '홈으로' : '다음 →'}</button></nav>`;
     wireSounds(app);
+    $$('[data-tab]').forEach(b => b.onclick = () => playTab(c.tabs[+b.dataset.tab], +b.dataset.rate));
+    $$('[data-stop]').forEach(b => b.onclick = stopAll);
+    if (c.loop) wireLoop(c.loop);
+    $('#list').onclick = () => { list = true; draw(); };
     $('#prev').onclick = () => { if (i > 0) { i--; draw(); } };
     $('#nextc').onclick = () => { if (last) go('#/'); else { i++; draw(); } };
   };
   draw();
-  swipe(() => { if (i < L.cards.length - 1) { i++; draw(); } }, () => { if (i > 0) { i--; draw(); } });
+  swipe(() => { if (!list && i < L.cards.length - 1) { i++; draw(); } }, () => { if (!list && i > 0) { i--; draw(); } });
 }
 
 function swipe(onLeft, onRight) {
@@ -912,7 +1100,7 @@ function runQuiz(ids, title) {
   let qn = 0, score = 0, prevKey = null, q, answered, timer;
   const wrongs = [];
   const next = () => {
-    clearTimeout(timer);
+    clearTimeout(timer); stopAll();
     if (qn >= N) return result();
     const id = pick(ids), Q = QUIZ[id];
     const key = pickWeighted(Q.items(), prevKey); prevKey = key;
@@ -936,9 +1124,9 @@ function runQuiz(ids, title) {
     </main>`;
     $$('.choice').forEach(b => b.onclick = () => answer(q.choices[+b.dataset.i].v, b));
     $$('.fb-hit').forEach(r => r.onclick = () => answer({ s: +r.dataset.s, f: +r.dataset.f }));
-    const l = $('.listen'); if (l) l.onclick = q.play;
+    const l = $('.listen'); if (l) l.onclick = () => { stopAll(); q.play(); };
     $('.next').onclick = () => { qn++; next(); };
-    if (q.autoplay) setTimeout(q.play, 150);
+    if (q.autoplay) later(q.play, 150);
   };
   const answer = (v, btn) => {
     if (answered) return;
@@ -956,13 +1144,14 @@ function runQuiz(ids, title) {
     if (after && q.tap && !ok) after = { ...after, marks: [...after.marks, { s: v.s, f: v.f, t: '✕', c: 'bad' }] };
     $('.boardwrap').innerHTML = after ? board(after) : '';
     $('.feedback').innerHTML = `<p class="${ok ? 'ok' : 'no'}"><b>${ok ? '정답!' : '아쉬워요'}</b> ${q.explain}</p>`;
-    if (!q.listen) q.play(); else if (!ok) setTimeout(q.play, 300);
+    stopAll();
+    if (q.playAfter) q.playAfter(); else if (!q.listen) q.play(); else if (!ok) later(q.play, 300);
     const nb = $('.next'); nb.classList.remove('hidden');
-    if (ok) timer = setTimeout(() => { if (document.body.contains(nb)) { qn++; next(); } }, 1600);
+    if (ok) timer = setTimeout(() => { if (document.body.contains(nb)) { qn++; next(); } }, q.wait || 1600);
     else navigator.vibrate?.(60);
   };
   const result = () => {
-    touchStreak();
+    touchStreak(); stopAll();
     const msg = score === N ? '완벽해요! 🎉' : score >= 7 ? '좋아요! 👍' : score >= 4 ? '익숙해지는 중' : '처음엔 다 이래요';
     app.innerHTML = `
     <main class="result">
@@ -1023,7 +1212,7 @@ function settings() {
     $('#real').onchange = e => { S.settings.real = e.target.checked; save(); };
     $('#tab').onchange = e => { S.settings.eTop = e.target.checked; save(); location.reload(); };
     $('#test').onclick = () => playSeq([28, 33, 38, 43]);
-    $('#reset').onclick = () => { if (confirm('진도를 모두 지울까요?')) { S.items = {}; S.lessons = {}; S.streak = { last: null, count: 0 }; save(); draw(); } };
+    $('#reset').onclick = () => { if (confirm('진도를 모두 지울까요?')) { S.items = {}; S.lessons = {}; S.pos = {}; S.streak = { last: null, count: 0 }; save(); draw(); } };
   };
   draw();
 }
@@ -1031,6 +1220,7 @@ function settings() {
 /* ───────── 라우터 ───────── */
 function go(h) { location.hash = h; }
 function route() {
+  stopAll();
   app.ontouchstart = app.ontouchend = null;
   window.scrollTo(0, 0);
   const [, page, arg] = (location.hash || '#/').split('/');
@@ -1045,4 +1235,5 @@ function route() {
 window.addEventListener('pointerdown', () => audio(), { once: true });
 audio();
 window.addEventListener('hashchange', route);
-route();
+// theory.js까지 다 읽은 뒤 첫 화면을 그린다
+document.addEventListener('DOMContentLoaded', route);

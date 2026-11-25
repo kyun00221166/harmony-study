@@ -144,3 +144,26 @@ small { color: var(--mute); font-weight: 400; font-size: .78em; }
 .card .snd { width: 100%; margin: 8px 0; }
 .danger { width: 100%; background: #3a1e22; color: var(--no); }
 hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
+
+/* TAB · 반주 루프 · 카드 목록 */
+.tab, .loop { background: var(--panel); border-radius: 14px; padding: 12px; margin: 12px 0; }
+.tabt { margin: 0 0 8px; font-weight: 700; font-size: 15px; line-height: 1.5; }
+.tabsvg { width: 100%; height: auto; display: block; margin-bottom: 6px; }
+.tb-l { stroke: #6b7183; stroke-width: 1.5; } .tb-b { stroke: #9298a8; stroke-width: 2.5; }
+.tb-bg { fill: var(--panel); } .tb-s { fill: var(--mute); font-size: 18px; font-weight: 700; }
+.tb-f { fill: var(--text); font-size: 25px; font-weight: 800; text-anchor: middle; }
+.tb-c { fill: var(--accent); font-size: 24px; font-weight: 800; }
+.tb-n { fill: var(--mute); font-size: 21px; text-anchor: middle; }
+.tb-d { fill: var(--ok); font-size: 23px; font-weight: 700; text-anchor: middle; } .tb-d.one { fill: var(--accent); }
+.tabbtn { display: flex; gap: 8px; margin-top: 8px; }
+.tabbtn button, .loopctl button:not(.primary) { background: var(--panel2); border-radius: 12px; padding: 12px; font-weight: 700; flex: 1; min-height: 46px; }
+.tabbtn button:last-child { flex: 0 0 52px; }
+.loopgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.loopgrid span { background: var(--panel2); border-radius: 8px; padding: 9px 2px; text-align: center; font-weight: 700; font-size: 13px; line-height: 1.35; min-height: 40px; display: flex; flex-direction: column; justify-content: center; }
+.loopgrid span.on { background: var(--accent); color: #1a1208; }
+.loopgrid i { display: block; }
+.loopctl { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.loopctl .primary { flex: 2; padding: 13px; } .loopctl button:not(.primary) { flex: 0 0 48px; } .loopctl b { min-width: 42px; text-align: center; }
+.loop .tog { background: var(--panel2); margin: 10px 0 0; padding: 12px; font-size: 15px; }
+.count { background: var(--panel); border-radius: 10px; padding: 8px 10px; font-size: 14px; color: var(--mute); min-height: 36px; }
+.listrow { width: 100%; text-align: left; line-height: 1.4; } .listrow.cur { outline: 2px solid var(--accent); }
